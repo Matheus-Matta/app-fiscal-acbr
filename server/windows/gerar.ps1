@@ -1,26 +1,40 @@
 # Gera windows\saida\AcbrFiscal\AcbrFiscal.exe e windows\saida\AcbrFiscal-Setup.exe.
 # Precisa de Python 3.12 e do Inno Setup 6. A lib da ACBr vai em windows\lib.
+#   -SoExe: só o AcbrFiscal.exe, sem o instalador (é o que o desktop embute).
+# As dependências vão num ambiente próprio (windows\.venv), não no Python do sistema.
 param(
     [string]$Python = "python",
     [string]$Iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
-    [switch]$Teste
+    [switch]$Teste,
+    [switch]$SoExe
 )
 $ErrorActionPreference = "Stop"
 $servidor = Split-Path $PSScriptRoot
 $saida = Join-Path $PSScriptRoot "saida"
 $trabalho = Join-Path ([IO.Path]::GetTempPath()) "acbrfiscal-build"
+$venv = Join-Path $PSScriptRoot ".venv"
+$py = Join-Path $venv "Scripts\python.exe"
 
-& $Python -m pip install -q -r (Join-Path $servidor "requirements.txt") pyinstaller
+if (-not (Test-Path $py)) {
+    & $Python -m venv $venv
+    if ($LASTEXITCODE) { throw "venv falhou" }
+}
+& $py -m pip install -q -r (Join-Path $servidor "requirements.txt") pyinstaller
 if ($LASTEXITCODE) { throw "pip falhou" }
 
-& $Python -m PyInstaller --noconfirm --clean --onedir --console --name AcbrFiscal `
+& $py -m PyInstaller --noconfirm --clean --onedir --console --name AcbrFiscal `
     --distpath $saida --workpath $trabalho --specpath $trabalho `
     --paths $servidor `
     --add-data "$servidor\config\ACBrLib.ini;config" `
-    --hidden-import app.simulador --hidden-import app.acbrlib `
+    --hidden-import app.simulador --hidden-import app.acbrlib --hidden-import app.configuracao `
     --collect-submodules uvicorn `
     (Join-Path $PSScriptRoot "servico.py")
 if ($LASTEXITCODE) { throw "PyInstaller falhou" }
+
+if ($SoExe) {
+    Get-Item (Join-Path $saida "AcbrFiscal\AcbrFiscal.exe") | Select-Object FullName, Length
+    return
+}
 
 $opcoes = @()
 if ($Teste) { $opcoes += "/DTESTE" }

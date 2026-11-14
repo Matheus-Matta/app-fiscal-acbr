@@ -39,7 +39,9 @@ def _texto(corpo):
 
 
 @pytest.fixture
-def ambiente(monkeypatch):
+def ambiente(monkeypatch, tmp_path):
+    # A configuração guardada (emitentes, token) de cada teste fica no seu tmp_path.
+    monkeypatch.setenv("ACBR_DATA_DIR", str(tmp_path / "dados"))
     monkeypatch.setenv("ACBRLIB_TOKEN", TOKEN)
     monkeypatch.setenv("ACBR_E2E_KEY", CHAVE_E2E)
     monkeypatch.setenv("ACBR_ALLOWED_ORIGINS", "https://caixa.exemplo.com.br")

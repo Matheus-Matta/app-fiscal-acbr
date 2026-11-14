@@ -26,7 +26,7 @@ ROTAS = ["/v1/status-servico", "/v1/nfe/emitir", "/v1/nfe/transmitir", "/v1/nfe/
 def _pfx(*, nome=f"EMPRESA TESTE LTDA:{CNPJ}", dias=365, senha=SENHA):
     chave = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     sujeito = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, nome)])
-    agora = datetime.datetime.now(datetime.timezone.utc)
+    agora = datetime.datetime.now(datetime.UTC)
     cert = (x509.CertificateBuilder().subject_name(sujeito).issuer_name(sujeito)
             .public_key(chave.public_key()).serial_number(x509.random_serial_number())
             .not_valid_before(agora - datetime.timedelta(days=400))

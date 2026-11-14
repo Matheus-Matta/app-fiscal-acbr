@@ -1,5 +1,10 @@
 # Emissor fiscal ACBrLib
 
+> Este documento descreve a integração com o backend StarChef (monorepo de origem):
+> caminhos como `docker/local/...`, `contingency.py` e `.github/workflows/fiscal_acbr.yml`
+> são de lá. O comunicador em si está em [`server/`](../server/README.md) — a API, a
+> configuração guardada e as regras de erro valem como descritas lá. A porta é **8030**.
+
 Terceira opção de emissão de NFC-e/NF-e, ao lado de **Manual** e **Focus NFe**:
 o próprio backend (loja ou nuvem) assina e transmite pela **ACBrLib**, que roda
 num container ao lado dele — o **comunicador** (`fiscal_acbr/`).
@@ -33,7 +38,7 @@ banco do backend, com o XML assinado.
 
 | Variável | Onde | Para quê |
 |---|---|---|
-| `ACBRLIB_URL` | `.env` do backend (loja e nuvem, cada um o seu) | onde o comunicador escuta, ex. `http://fiscal-acbr:8001` |
+| `ACBRLIB_URL` | `.env` do backend (loja e nuvem, cada um o seu) | onde o comunicador escuta, ex. `http://fiscal-acbr:8030` |
 | `ACBRLIB_TOKEN` | backend **e** comunicador (o mesmo) | o comunicador só atende quem mostra o token |
 | `ACBRLIB_TIMEOUT` | backend (padrão 40 s) | maior que o da SEFAZ: um timeout curto vira "não sei se emitiu" |
 | `ACBR_LIB_PATH` | comunicador | caminho da `libacbrnfe64.so` (obtida à parte, ver abaixo) |
@@ -54,7 +59,7 @@ sem ninguém ter pedido faria a loja "emitir" notas que nunca existiram na SEFAZ
 ### No servidor da loja (`docker/local`)
 
 O serviço `fiscal-acbr` faz parte do compose da loja e **sobe sempre**, sem
-perfil: o backend já recebe `ACBRLIB_URL=http://fiscal-acbr:8001` fixo no
+perfil: o backend já recebe `ACBRLIB_URL=http://fiscal-acbr:8030` fixo no
 compose, e o instalador gera o `ACBRLIB_TOKEN` e **instala a lib sozinho**
 (`instalar-acbrlib.sh`/`.ps1`): baixa o pacote de `ACBRLIB_PACOTE_URL`, confere
 a `libacbrnfe64.so` contra `ACBRLIB_SO_SHA256` e põe a lib e os `.xsd` de
@@ -157,7 +162,7 @@ não derruba o container: ele sobe "unhealthy" e diz o motivo.
 ### Na nuvem (`docker-compose.yml`)
 
 O `fiscal-acbr` também sobe sempre na nuvem, sem perfil. Os quatro serviços
-da imagem do backend recebem `ACBRLIB_URL=${ACBRLIB_URL:-http://fiscal-acbr:8001}`:
+da imagem do backend recebem `ACBRLIB_URL=${ACBRLIB_URL:-http://fiscal-acbr:8030}`:
 o valor do `.env` vale; vazio, vale o emissor da própria nuvem. A lib fica em
 `./acbr/libs` (fora do git). A nuvem emite para conta sem servidor de loja; com
 loja, só a venda feita na nuvem e só com "A nuvem também emite" ligado

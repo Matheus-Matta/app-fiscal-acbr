@@ -1,12 +1,25 @@
+// A ponte da página para o processo principal. A página não tem Node nem rede:
+// tudo passa por aqui, por canais fixos.
 const { contextBridge, ipcRenderer } = require('electron');
 
-contextBridge.exposeInMainWorld('api', {
-  login: (email, password) =>
-    ipcRenderer.invoke('login', { email, password }),
-
-  getRestaurants: (token) =>
-    ipcRenderer.invoke('get-restaurants', token),
-
-  syncData: (token, restaurantId) =>
-    ipcRenderer.invoke('sync-data', { token, restaurantId }),
+contextBridge.exposeInMainWorld('comunicador', {
+  estado: () => ipcRenderer.invoke('estado'),
+  log: () => ipcRenderer.invoke('log'),
+  lerConfig: () => ipcRenderer.invoke('config:ler'),
+  salvarEmitente: (dados) => ipcRenderer.invoke('config:emitente', dados),
+  removerEmitente: (cnpj) => ipcRenderer.invoke('config:remover', cnpj),
+  trocarToken: (token) => ipcRenderer.invoke('config:token', token),
+  statusSefaz: (cnpj) => ipcRenderer.invoke('sefaz:status', cnpj),
+  escolherCertificado: () => ipcRenderer.invoke('certificado:escolher'),
+  lerAcesso: () => ipcRenderer.invoke('acesso:ler'),
+  salvarAcesso: (dados) => ipcRenderer.invoke('acesso:salvar', dados),
+  reiniciarServidor: () => ipcRenderer.invoke('servidor:reiniciar'),
+  abrirPasta: (qual) => ipcRenderer.invoke('pasta:abrir', qual),
+  copiar: (texto) => ipcRenderer.invoke('copiar', texto),
+  iniciarComWindows: (ativo) => ipcRenderer.invoke('windows:iniciar', ativo),
+  aoMudarServidor: (funcao) => {
+    const ouvinte = (_evento, estado) => funcao(estado);
+    ipcRenderer.on('servidor:estado', ouvinte);
+    return () => ipcRenderer.removeListener('servidor:estado', ouvinte);
+  },
 });

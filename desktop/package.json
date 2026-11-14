@@ -1,55 +1,65 @@
 {
-  "name": "fiscal-acbr-desktop",
-  "version": "1.0.0",
-  "description": "Comunicador Fiscal ACBr - Instalador Windows para PDV Offline",
+  "name": "comunicador-fiscal-desktop",
+  "version": "1.1.0",
+  "description": "Comunicador Fiscal ACBr para o PC da loja: emite e faz contingência local, sem depender de internet",
+  "private": true,
   "main": "src/main/main.js",
-  "homepage": "./",
   "scripts": {
-    "start": "concurrently \"npm run start:react\" \"wait-on http://localhost:3000 && npm run start:electron\"",
-    "start:react": "react-scripts start",
-    "start:electron": "electron .",
-    "build": "npm run build:react && npm run build:electron",
-    "build:react": "react-scripts build",
-    "build:electron": "electron-builder",
-    "eject": "react-scripts eject"
-  },
-  "dependencies": {
-    "axios": "^1.6.0",
-    "electron-squirrel-startup": "^1.1.1",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "dev": "concurrently -k -n ui,app \"vite\" \"wait-on tcp:5173 && cross-env ACBR_DEV_URL=http://localhost:5173 node scripts/abrir-electron.js\"",
+    "start": "npm run build:ui && node scripts/abrir-electron.js",
+    "build:ui": "vite build",
+    "build:servidor": "powershell -NoProfile -ExecutionPolicy Bypass -File ../server/windows/gerar.ps1 -SoExe",
+    "build": "npm run build:ui && electron-builder --win portable --x64",
+    "build:tudo": "npm run build:servidor && npm run build",
+    "test": "node --test \"src/main/**/*.test.js\""
   },
   "devDependencies": {
-    "@testing-library/jest-dom": "^5.16.5",
-    "@testing-library/react": "^13.4.0",
-    "@testing-library/user-event": "^13.5.0",
-    "concurrently": "^7.6.0",
-    "electron": "^27.0.0",
-    "electron-builder": "^24.6.0",
-    "react-scripts": "5.0.1",
-    "wait-on": "^7.0.1"
+    "@vitejs/plugin-react": "^6.3.0",
+    "concurrently": "^10.0.7",
+    "cross-env": "^10.1.0",
+    "electron": "^45.3.2",
+    "electron-builder": "^26.18.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "vite": "^8.3.8",
+    "wait-on": "^9.5.1"
   },
   "build": {
-    "appId": "com.starchef.fiscal",
-    "productName": "StarChef Fiscal",
+    "appId": "br.com.starchef.comunicadorfiscal",
+    "productName": "Comunicador Fiscal",
+    "directories": {
+      "output": "dist"
+    },
     "files": [
       "build/**/*",
-      "src/main/main.js",
-      "src/preload/preload.js",
-      "node_modules/**/*"
+      "src/main/**/*",
+      "!src/main/**/*.test.js",
+      "src/preload/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../server/windows/saida/AcbrFiscal",
+        "to": "servidor"
+      },
+      {
+        "from": "resources/icone.png",
+        "to": "icone.png"
+      }
     ],
     "win": {
+      "icon": "resources/icone.png",
       "target": [
-        "nsis",
-        "portable"
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
       ]
     },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true,
-      "shortcutName": "StarChef Fiscal"
+    "portable": {
+      "artifactName": "ComunicadorFiscal-${version}.exe"
     }
   }
 }

@@ -37,6 +37,27 @@ def _abrir_pfx(pfx_base64):
     return pfx
 
 
+def descrever(pfx_base64, senha):
+    """Titular, CNPJ e validade do A1 guardado, para o desktop mostrar. Sem segredo."""
+    if not pfx_base64:
+        return {"presente": False}
+    try:
+        _chave, cert, _ = load_key_and_certificates(_abrir_pfx(pfx_base64), senha.encode())
+    except (sefaz.FalhaFiscal, ValueError):
+        return {"presente": True, "erro": "Não abre com a senha guardada."}
+    except UnsupportedAlgorithm:
+        return {"presente": True, "erro": "Formato antigo: só a ACBrLib consegue ler."}
+    if cert is None:
+        return {"presente": True, "erro": "O .pfx não tem certificado."}
+    nomes = cert.subject.get_attributes_for_oid(NameOID.COMMON_NAME)
+    titular = nomes[0].value if nomes else ""
+    achado = _CNPJ_NO_NOME.search(titular)
+    vence_em = cert.not_valid_after_utc
+    return {"presente": True, "titular": titular, "cnpj": achado.group(1) if achado else "",
+            "vence_em": vence_em.date().isoformat(),
+            "vencido": vence_em <= datetime.datetime.now(datetime.UTC)}
+
+
 def conferir(pedido, *, exigir):
     """Devolve o pedido, ou recusa. `exigir`: sem a lib real, a falta do A1 não é o problema."""
     if not pedido.certificado.pfx_base64:
@@ -56,7 +77,7 @@ def conferir(pedido, *, exigir):
         raise _recusar("O .pfx precisa conter o certificado e a chave privada.", "certificado_invalido")
 
     vence_em = cert.not_valid_after_utc
-    if vence_em <= datetime.datetime.now(datetime.timezone.utc):
+    if vence_em <= datetime.datetime.now(datetime.UTC):
         raise _recusar(f"O certificado venceu em {vence_em:%d/%m/%Y}.", "certificado_vencido")
     nomes = cert.subject.get_attributes_for_oid(NameOID.COMMON_NAME)
     achado = _CNPJ_NO_NOME.search(nomes[0].value if nomes else "")

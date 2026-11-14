@@ -12,18 +12,24 @@ porque o comunicador atende qualquer CNPJ que o backend mandar.
 Os valores das enumerações (`Ambiente`, `ModeloDF`, `FormaEmissao`) seguem a
 documentação da ACBrLib e são os primeiros a conferir na homologação.
 """
+import contextlib
 import ctypes
+import os
 import re
 import threading
 
 from app import ini, sefaz
 
 TAMANHO = 1024 * 512
+#: Quanto uma chamada espera a vez na trava. A espera soma ao timeout da SEFAZ
+#: (30 s) contra o do cliente (ACBRLIB_TIMEOUT, 40 s): esperar demais faria o
+#: cliente desistir de uma nota que ainda SERIA enviada. Sem a vez, nada foi
+#: enviado — é seguro responder `sem_comunicacao`.
+ESPERA_TRAVA = float(os.environ.get("ACBR_ESPERA_TRAVA", "8"))
 FORMA_EMISSAO = {"1": "0", "9": "8"}  # teNormal, teOffLine (NFC-e)
 _QR = re.compile(r"<qrCode>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?</qrCode>", re.S)
 _DIGEST = re.compile(r"<DigestValue>(.*?)</DigestValue>", re.S)
 _CHAVE = re.compile(r'Id="NFe(\d{44})"')
-
 
 
 def fuso_local():
@@ -35,6 +41,7 @@ def fuso_local():
     bruto = time.strftime("%z")  # "-0300"
     return f"{bruto[:3]}:{bruto[3:]}"
 
+
 class AcbrLib:
     nome = "acbrlib"
 
@@ -45,22 +52,39 @@ class AcbrLib:
         self._ok(self.lib.NFE_Inicializar(ctypes.byref(self.handle), _c(arquivo_config), _c("")))
 
     # ── chamadas de baixo nível ───────────────────────────────────────────
-    def _ok(self, codigo):
+    @contextlib.contextmanager
+    def _vez(self):
+        if not self.trava.acquire(timeout=ESPERA_TRAVA):
+            raise sefaz.FalhaDeComunicacao(
+                "O comunicador está ocupado com outra nota; esta nem foi enviada. Tente de novo.",
+                "comunicador_ocupado")
+        try:
+            yield
+        finally:
+            self.trava.release()
+
+    def _ok(self, codigo, enviando=False):
         if codigo < 0:
-            raise _classificar(self._ultimo_retorno())
+            raise _classificar(self._ultimo_retorno(), enviando=enviando)
 
-    def _ultimo_retorno(self):
-        tamanho = ctypes.c_int(TAMANHO)
-        buffer = ctypes.create_string_buffer(TAMANHO)
-        self.lib.NFE_UltimoRetorno(self.handle, buffer, ctypes.byref(tamanho))
-        return buffer.value.decode("utf-8", "replace")
+    def _ultimo_retorno(self, tamanho_inicial=TAMANHO):
+        # A lib informa em `tamanho` quanto a resposta precisa: se não coube, pede de
+        # novo com o buffer do tamanho certo — antes saía cortada em 512 KB, calada.
+        capacidade = tamanho_inicial
+        while True:
+            tamanho = ctypes.c_int(capacidade)
+            buffer = ctypes.create_string_buffer(capacidade + 1)
+            self.lib.NFE_UltimoRetorno(self.handle, buffer, ctypes.byref(tamanho))
+            if tamanho.value <= capacidade:
+                return buffer.value.decode("utf-8", "replace")
+            capacidade = tamanho.value
 
-    def _texto(self, funcao, *args):
+    def _texto(self, funcao, *args, enviando=False):
         tamanho = ctypes.c_int(TAMANHO)
-        buffer = ctypes.create_string_buffer(TAMANHO)
-        self._ok(funcao(self.handle, *args, buffer, ctypes.byref(tamanho)))
+        buffer = ctypes.create_string_buffer(TAMANHO + 1)
+        self._ok(funcao(self.handle, *args, buffer, ctypes.byref(tamanho)), enviando=enviando)
         if tamanho.value > TAMANHO:  # a resposta não coube: a lib a guarda no último retorno
-            return self._ultimo_retorno()
+            return self._ultimo_retorno(tamanho.value)
         return buffer.value.decode("utf-8", "replace")
 
     def _configurar(self, pedido, tp_emis="1"):
@@ -88,7 +112,7 @@ class AcbrLib:
 
     # ── operações do contrato ─────────────────────────────────────────────
     def emitir(self, pedido):
-        with self.trava:
+        with self._vez():
             self._configurar(pedido, pedido.tp_emis)
             self._ok(self.lib.NFE_LimparLista(self.handle))
             self._ok(self.lib.NFE_CarregarINI(self.handle, _c(pedido.ini)))
@@ -100,15 +124,15 @@ class AcbrLib:
             return self._enviar(pedido)
 
     def transmitir(self, pedido):
-        with self.trava:
+        with self._vez():
             self._configurar(pedido, "9")
             self._ok(self.lib.NFE_LimparLista(self.handle))
             self._ok(self.lib.NFE_CarregarXML(self.handle, _c(pedido.xml)))
             return self._enviar(pedido)
 
     def _enviar(self, pedido):
-        resposta = ini.ler(self._texto(self.lib.NFE_Enviar, ctypes.c_int(1),
-                                       ctypes.c_bool(False), ctypes.c_bool(True), ctypes.c_bool(False)))
+        resposta = ini.ler(self._texto(self.lib.NFE_Enviar, ctypes.c_int(1), ctypes.c_bool(False),
+                                       ctypes.c_bool(True), ctypes.c_bool(False), enviando=True))
         nota = ini.primeira(resposta, "nfe", "retorno", "envio")
         cstat = nota.get("cstat", "")
         if cstat in sefaz.DUPLICIDADE:
@@ -116,7 +140,7 @@ class AcbrLib:
         return self._resultado(nota, xml=self._xml_atual())
 
     def consultar(self, pedido):
-        with self.trava:
+        with self._vez():
             self._configurar(pedido)
             return self._consultar_chave(pedido, pedido.chave)
 
@@ -125,15 +149,15 @@ class AcbrLib:
         return self._resultado(ini.primeira(resposta, "consulta", "retorno"), chave=chave)
 
     def cancelar(self, pedido):
-        with self.trava:
+        with self._vez():
             self._configurar(pedido)
-            resposta = ini.ler(self._texto(self.lib.NFE_Cancelar, _c(pedido.chave),
-                                           _c(pedido.justificativa), _c(pedido.cnpj), ctypes.c_int(1)))
+            resposta = ini.ler(self._texto(self.lib.NFE_Cancelar, _c(pedido.chave), _c(pedido.justificativa),
+                                           _c(pedido.cnpj), ctypes.c_int(1), enviando=True))
             return self._resultado(ini.primeira(resposta, "evento", "cancelamento", "retorno"),
                                    chave=pedido.chave)
 
     def status_servico(self, pedido):
-        with self.trava:
+        with self._vez():
             self._configurar(pedido)
             resposta = ini.primeira(ini.ler(self._texto(self.lib.NFE_StatusServico)), "status")
         cstat = resposta.get("cstat", "")
@@ -156,17 +180,33 @@ def _do_xml(xml):
     return {"chave": achar(_CHAVE), "qrcode": achar(_QR).strip(), "digest_value": achar(_DIGEST)}
 
 
-def _classificar(mensagem):
-    """A falha da lib vira a família do contrato (docs/FISCAL_ACBRLIB.md)."""
+#: Falhas que só acontecem ANTES de a nota sair: nome não resolve, conexão recusada,
+#: rede inacessível (códigos Winsock 11001, 10061, 10065, 10051).
+_ANTES_DO_ENVIO = ("resolver", "could not resolve", "host not found", "host desconhecido", "connection refused",
+                   "conexão recusada", "conexao recusada", "11001", "10061", "10065", "10051",
+                   "network is unreachable", "rede inacess")
+_COMUNICACAO = ("socket", "conex", "http", "host", "resolver", "winsock")
+
+
+def _classificar(mensagem, enviando=False):
+    """A falha da lib vira a família do contrato (docs/FISCAL_ACBRLIB.md).
+
+    `enviando`: a falha veio de uma chamada que transmite (envio, cancelamento).
+    Aí, falha de comunicação só é `sem_comunicacao` ("seguro reenviar ou entrar
+    em contingência") quando é das que acontecem antes de a nota sair; o resto —
+    "Erro HTTP 500", conexão caída no meio — pode ter chegado à SEFAZ: `incerto`.
+    """
     texto = mensagem.lower()
     if any(p in texto for p in ("certificado", "pfx", "senha", "csc", "biblioteca")):
         return sefaz.FalhaDeConfiguracao(mensagem, _motivo_de_configuracao(texto))
     if any(p in texto for p in ("schema", "validar", "rejei", "ini inv")):
         return sefaz.DocumentoInvalido(mensagem)
     if any(p in texto for p in ("timeout", "tempo limite", "timed out", "read timed")):
-        return sefaz.FalhaIncerta(mensagem)
-    if any(p in texto for p in ("socket", "conex", "http", "host", "resolver", "winsock")):
-        return sefaz.FalhaDeComunicacao(mensagem, "sefaz_sem_comunicacao")
+        return sefaz.FalhaIncerta(mensagem, "sefaz_sem_resposta")
+    if any(p in texto for p in _COMUNICACAO):
+        if not enviando or any(p in texto for p in _ANTES_DO_ENVIO):
+            return sefaz.FalhaDeComunicacao(mensagem, "sefaz_sem_comunicacao")
+        return sefaz.FalhaIncerta(mensagem, "sefaz_sem_resposta")
     # Falha não reconhecida durante o envio: tratar como INCERTA é o lado seguro —
     # o backend consulta antes de qualquer reenvio.
     return sefaz.FalhaIncerta(mensagem)

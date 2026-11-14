@@ -12,6 +12,7 @@ nenhum, e quem testava concluía que a emissão funcionava. Agora a resposta diz
 que é simulada, e produção é recusada.
 """
 import os
+import re
 from datetime import datetime
 
 from app import ini, sefaz
@@ -29,10 +30,14 @@ def _dv(chave43):
 
 def chave_do_ini(texto, uf, cnpj):
     ident = ini.ler(texto).get("identificacao", {})
-    emissao = datetime.strptime(ident["dhemi"], "%d/%m/%Y %H:%M:%S")
-    chave43 = (f"{_UF.get(uf.upper(), '00')}{emissao:%y%m}{cnpj.rjust(14, '0')}"
-               f"{ident['mod'].rjust(2, '0')}{ident['serie'].rjust(3, '0')}"
-               f"{ident['nnf'].rjust(9, '0')}{ident['tpemis']}{ident['cnf'].rjust(8, '0')}")
+    try:
+        emissao = datetime.strptime(ident["dhemi"], "%d/%m/%Y %H:%M:%S")
+        chave43 = (f"{_UF.get(uf.upper(), '00')}{emissao:%y%m}{cnpj.rjust(14, '0')}"
+                   f"{ident['mod'].rjust(2, '0')}{ident['serie'].rjust(3, '0')}"
+                   f"{ident['nnf'].rjust(9, '0')}{ident['tpemis']}{ident['cnf'].rjust(8, '0')}")
+    except (KeyError, ValueError) as erro:
+        # A lib recusaria o INI do mesmo jeito: é documento inválido, não falha incerta.
+        raise sefaz.DocumentoInvalido(f"INI sem [Identificacao] completa ({erro}).", "ini_invalido") from None
     return f"{chave43}{_dv(chave43)}"
 
 
@@ -89,7 +94,10 @@ class Simulador:
 
     def transmitir(self, pedido):
         _recusar_producao(pedido)
-        chave = pedido.xml.split('Id="NFe')[1][:44]
+        achada = re.search(r'Id="NFe(\d{44})"', pedido.xml)
+        if not achada:
+            raise sefaz.DocumentoInvalido("O XML não tem a chave (Id=\"NFe...\").", "xml_invalido")
+        chave = achada.group(1)
         return self._transmitir(chave, pedido.xml)
 
     def consultar(self, pedido):

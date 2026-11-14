@@ -26,7 +26,7 @@ def _motor():
 
 
 def _pedido(**extra):
-    return Emitir(uf="SP", cnpj="11222333000181", ini="", **extra)
+    return Emitir(uf="SP", cnpj="11222333000181", ini="[Identificacao]", **extra)
 
 
 def test_o_fuso_vai_em_modo_manual_com_o_que_o_backend_mandou():

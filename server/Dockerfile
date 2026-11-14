@@ -6,6 +6,7 @@ FROM python:3.12-slim-bookworm
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    ACBR_DATA_DIR=/app/data \
     LD_LIBRARY_PATH=/app/libs:/opt/acbr \
     ACBR_LIB_PATH=/app/libs/libacbrnfe64.so \
     ACBR_CONFIG=/app/config/ACBrLib.ini \
@@ -39,6 +40,11 @@ COPY config/ ./config/
 COPY embutida/ /opt/acbr/
 
 EXPOSE 8030
+
+# Sem isto o 503 do /health (lib ausente) não aparecia no `docker ps`. A imagem slim
+# não tem curl: o próprio Python confere. Não reinicia sozinho — só fica visível.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8030/health', timeout=4)"]
 
 # UM worker: a ACBrLib não é reentrante para o mesmo handle (`app/acbrlib.py`).
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8030", "--workers", "1"]

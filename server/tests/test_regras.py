@@ -53,3 +53,71 @@ def test_le_chave_qr_e_digest_do_xml_assinado():
     xml = ('<NFe><infNFe Id="NFe' + "3" * 44 + '"/><DigestValue>abc=</DigestValue>'
            "<infNFeSupl><qrCode><![CDATA[https://qr?p=1]]></qrCode></infNFeSupl></NFe>")
     assert _do_xml(xml) == {"chave": "3" * 44, "qrcode": "https://qr?p=1", "digest_value": "abc="}
+
+
+# ── a lib durante o envio, a trava e o buffer ────────────────────────────────
+@pytest.mark.parametrize(("mensagem", "classe"), [
+    # Caiu no meio: a SEFAZ pode ter recebido. Nunca "seguro reenviar".
+    ("Erro HTTP: 500 Internal Server Error", sefaz.FalhaIncerta),
+    ("Socket Error # 10054 Connection reset by peer", sefaz.FalhaIncerta),
+    # Nem saiu: seguro.
+    ("Socket Error # 10061 Connection refused", sefaz.FalhaDeComunicacao),
+    ("Socket Error # 11001 Host not found", sefaz.FalhaDeComunicacao),
+])
+def test_durante_o_envio_so_e_sem_comunicacao_o_que_nao_saiu(mensagem, classe):
+    assert isinstance(_classificar(mensagem, enviando=True), classe)
+
+
+def test_fora_do_envio_falha_de_rede_continua_sem_comunicacao():
+    assert isinstance(_classificar("Erro HTTP: 500"), sefaz.FalhaDeComunicacao)
+
+
+class LibDeResposta:
+    """Responde `dados` como a ACBrLib: diz o tamanho e só copia o que cabe."""
+
+    def __init__(self, dados):
+        self.dados = dados
+
+    def _copiar(self, buffer, tamanho):
+        capacidade = tamanho._obj.value
+        tamanho._obj.value = len(self.dados)
+        if len(self.dados) <= capacidade:
+            buffer.value = self.dados
+
+    def NFE_StatusServico(self, _handle, buffer, tamanho):
+        self._copiar(buffer, tamanho)
+        return 0
+
+    def NFE_UltimoRetorno(self, _handle, buffer, tamanho):
+        self._copiar(buffer, tamanho)
+        return 0
+
+
+def _motor_com(lib):
+    import threading
+
+    from app.acbrlib import AcbrLib
+
+    motor = AcbrLib.__new__(AcbrLib)
+    motor.lib, motor.handle, motor.trava = lib, None, threading.Lock()
+    return motor
+
+
+def test_resposta_maior_que_o_buffer_volta_inteira():
+    from app.acbrlib import TAMANHO
+
+    grande = b"[Status]\nxMotivo=" + b"x" * (TAMANHO * 2) + b"\n"
+    motor = _motor_com(LibDeResposta(grande))
+    assert motor._texto(motor.lib.NFE_StatusServico).encode() == grande
+
+
+def test_com_a_trava_ocupada_responde_sem_comunicacao_sem_enviar(monkeypatch):
+    import app.acbrlib
+
+    monkeypatch.setattr(app.acbrlib, "ESPERA_TRAVA", 0.01)
+    motor = _motor_com(LibDeResposta(b""))
+    motor.trava.acquire()
+    with pytest.raises(sefaz.FalhaDeComunicacao) as erro:
+        with motor._vez():
+            pass
+    assert erro.value.motivo == "comunicador_ocupado"

@@ -1,5 +1,8 @@
 """O .exe: a mesma API do Docker, com o mesmo .env, em http://127.0.0.1:8030.
 
+Serve ao serviço Windows (instalador.iss) e ao desktop, que o abre com
+ACBR_DATA_DIR apontando para a pasta do usuário e grava o .env antes.
+
     AcbrFiscal.exe configurar         define token, chave e origens (grava o .env)
     AcbrFiscal.exe                    sobe a API
     AcbrFiscal.exe instalar-tarefa    sobe sozinho com o Windows (pede administrador)
@@ -111,8 +114,16 @@ def _preparar_ambiente():
     for chave, valor in ler_env(arquivo).items():
         os.environ.setdefault(chave, valor)
 
-    lib = pasta_programa() / "lib"
     dados = pasta_dados()
+    # A configuração guardada (`app/configuracao.py`) mora junto do .env.
+    os.environ.setdefault("ACBR_DATA_DIR", str(dados))
+    # A lib na pasta de dados vale primeiro: o desktop portátil se extrai numa pasta
+    # temporária a cada início, e é lá (em dados\lib) que a loja a copia. A do
+    # programa só vale se estiver lá (o instalador do serviço a põe); sem nenhuma,
+    # a mensagem de "lib ausente" aponta a pasta de dados.
+    junto_do_programa = pasta_programa() / "lib"
+    lib = junto_do_programa if (not (dados / "lib").is_dir() and (junto_do_programa / "ACBrNFe64.dll").exists()) \
+        else dados / "lib"
     ini = dados / "ACBrLib.ini"
     base = (Path(getattr(sys, "_MEIPASS", pasta_programa().parent)) / "config" / "ACBrLib.ini").read_text(encoding="utf-8")
     ini.write_text(base.replace("/app/data", str(dados)).replace("/app/libs", str(lib)), encoding="utf-8")
