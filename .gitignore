@@ -27,3 +27,4 @@ Thumbs.db
 
 # Ferramentas de IDE
 .github/modernize/
+.ruff_cache/

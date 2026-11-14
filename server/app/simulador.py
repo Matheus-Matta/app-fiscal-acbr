@@ -3,7 +3,7 @@
 `ACBR_SIMULAR_SEFAZ` escolhe o comportamento: `online` (autoriza), `fora`
 (sem comunicação), `lenta` (resposta perdida depois do envio) e `recusa`. A
 chave é calculada do INI do mesmo jeito que a SEFAZ faria — e do jeito que o
-backend calculou —, então o resto do sistema não percebe a diferença.
+cliente calculou —, então o resto do sistema não percebe a diferença.
 
 O QUE ELE NUNCA FAZ é se passar pela SEFAZ de verdade. Respondia "Autorizado o
 uso da NF-e" — a frase real — e autorizava até em PRODUÇÃO: na nuvem de teste
@@ -52,7 +52,7 @@ def _recusar_producao(pedido):
         raise sefaz.FalhaDeConfiguracao(
             "SEFAZ SIMULADA não emite em PRODUÇÃO: nenhuma nota foi enviada à SEFAZ. "
             "Para emitir de verdade, instale a libacbrnfe64.so e tire o "
-            "ACBR_SIMULADOR=1 do serviço fiscal-acbr (docs/FISCAL_ACBRLIB.md)."
+            "ACBR_SIMULADOR=1 do comunicador (docs/INTEGRACAO.md)."
         )
 
 

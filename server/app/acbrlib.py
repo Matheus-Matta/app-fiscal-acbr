@@ -7,7 +7,7 @@ Um retorno 0 é a CHAMADA que deu certo; a autorização é o cStat (`sefaz.py`)
 A lib não é reentrante para o mesmo handle: um handle por processo, atrás de
 uma trava — e o uvicorn roda com UM worker (Dockerfile). A configuração (UF,
 ambiente, modelo, certificado, CSC, forma de emissão) é gravada a cada chamada,
-porque o comunicador atende qualquer CNPJ que o backend mandar.
+porque o comunicador atende qualquer CNPJ que o cliente mandar.
 
 Os valores das enumerações (`Ambiente`, `ModeloDF`, `FormaEmissao`) seguem a
 documentação da ACBrLib e são os primeiros a conferir na homologação.
@@ -45,11 +45,14 @@ def fuso_local():
 class AcbrLib:
     nome = "acbrlib"
 
-    def __init__(self, caminho, arquivo_config="/app/config/ACBrLib.ini"):
+    def __init__(self, caminho, arquivo_config="/app/config/ACBrLib.ini", schemas=None):
         self.lib = ctypes.CDLL(caminho)
         self.trava = threading.Lock()
         self.handle = ctypes.c_void_p()
         self._ok(self.lib.NFE_Inicializar(ctypes.byref(self.handle), _c(arquivo_config), _c("")))
+        if schemas:
+            # O do .ini aponta /app/libs; a lib embutida tem os seus em /opt/acbr.
+            self._ok(self.lib.NFE_ConfigGravarValor(self.handle, _c("NFe"), _c("PathSchemas"), _c(schemas)))
 
     # ── chamadas de baixo nível ───────────────────────────────────────────
     @contextlib.contextmanager
@@ -189,7 +192,7 @@ _COMUNICACAO = ("socket", "conex", "http", "host", "resolver", "winsock")
 
 
 def _classificar(mensagem, enviando=False):
-    """A falha da lib vira a família do contrato (docs/FISCAL_ACBRLIB.md).
+    """A falha da lib vira a família do contrato (docs/INTEGRACAO.md).
 
     `enviando`: a falha veio de uma chamada que transmite (envio, cancelamento).
     Aí, falha de comunicação só é `sem_comunicacao` ("seguro reenviar ou entrar
@@ -208,7 +211,7 @@ def _classificar(mensagem, enviando=False):
             return sefaz.FalhaDeComunicacao(mensagem, "sefaz_sem_comunicacao")
         return sefaz.FalhaIncerta(mensagem, "sefaz_sem_resposta")
     # Falha não reconhecida durante o envio: tratar como INCERTA é o lado seguro —
-    # o backend consulta antes de qualquer reenvio.
+    # o cliente consulta antes de qualquer reenvio.
     return sefaz.FalhaIncerta(mensagem)
 
 

@@ -1,8 +1,8 @@
-"""O contrato com o cliente (docs/FISCAL_ACBRLIB.md, "Contrato").
+"""O contrato com o cliente (server/README.md, "Operações").
 
-Quem emite, onde e com qual certificado pode chegar em toda chamada (o backend
-StarChef faz assim) ou ficar guardado no comunicador (`configuracao.py`, o que o
-desktop e o painel gravam). O que vier na chamada vale sobre o guardado.
+Quem emite, onde e com qual certificado pode chegar em toda chamada ou ficar
+guardado no comunicador (`configuracao.py`, o que o desktop grava). O que vier
+na chamada vale sobre o guardado.
 """
 import re
 from typing import Literal

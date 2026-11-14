@@ -9,8 +9,7 @@ desktop, `%PROGRAMDATA%\\AcbrFiscal` no serviço Windows) e é gravada pelas rot
 - `acesso.json`: o SHA-256 do token trocado pela API. Ele vale no lugar do
   `ACBRLIB_TOKEN` do .env; apagar o arquivo devolve o acesso ao token do .env.
 
-A chamada continua podendo trazer tudo (o backend StarChef faz assim): o que vier
-nela vale sobre o guardado.
+A chamada continua podendo trazer tudo: o que vier nela vale sobre o guardado.
 """
 import hashlib
 import json

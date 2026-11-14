@@ -9,4 +9,4 @@ cifradas de ponta a ponta, roda de três jeitos:
 | [`server/windows`](server/README.md#windows-exe) — serviço Windows | O mesmo, instalado como tarefa do Windows (Inno Setup). |
 | [`desktop/`](desktop/README.md) — `.exe` portátil | O PC da loja sem depender de internet: tela de configuração (emitente, certificado, CSC, token), comunicador embutido, fica na bandeja e faz a contingência offline local. Também configura um Docker remoto. |
 
-Integração com o backend StarChef: [`docs/FISCAL_ACBRLIB.md`](docs/FISCAL_ACBRLIB.md).
+Como integrar qualquer PDV ou ERP: [`docs/INTEGRACAO.md`](docs/INTEGRACAO.md).

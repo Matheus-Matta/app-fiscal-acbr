@@ -6,3 +6,4 @@ embutida/*.so*
 windows/lib/
 windows/saida/
 windows/.venv/
+embutida/Schemas/

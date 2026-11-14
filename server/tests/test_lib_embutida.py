@@ -1,9 +1,9 @@
-"""A lib que a Action embutiu na imagem vale quando a loja não montou outra.
+"""A lib embutida na imagem vale quando ninguém montou outra.
 
-A Action `fiscal_acbr.yml` pode baixar a libacbrnfe64.so (Secret
-`ACBRLIB_SO_URL`) e pô-la DENTRO da imagem, em /opt/acbr: a loja deixa de
-copiar o arquivo à mão. A montada em /app/libs continua tendo precedência —
-é como uma loja testa uma versão nova da lib sem esperar uma imagem nova.
+Com a libacbrnfe64.so em embutida/ no build, ela vai DENTRO da imagem, em
+/opt/acbr: quem instala não copia o arquivo à mão. A montada em /app/libs
+continua tendo precedência — é como se testa uma versão nova da lib sem
+esperar uma imagem nova.
 """
 import pytest
 
@@ -11,8 +11,9 @@ from app import motor
 
 
 class LibFalsa:
-    def __init__(self, caminho, _config):
+    def __init__(self, caminho, _config, schemas=None):
         self.caminho = caminho
+        self.schemas = schemas
         self.nome = "acbrlib"
 
 
@@ -54,7 +55,7 @@ def test_lib_que_nao_carrega_nao_derruba_o_comunicador(caminhos, monkeypatch):
     _montada, embutida = caminhos
     embutida.write_bytes(b"isto nao e uma .so")
 
-    def falha(_caminho, _config):
+    def falha(_caminho, _config, **_extra):
         raise OSError("invalid ELF header")
 
     monkeypatch.setattr("app.acbrlib.AcbrLib", falha)
@@ -86,3 +87,15 @@ def test_lib_com_os_schemas_carrega(caminhos, monkeypatch, tmp_path):
     monkeypatch.setenv("ACBR_SCHEMAS", str(tmp_path / "Schemas"))
 
     assert motor.criar_motor().nome == "acbrlib"
+
+
+def test_a_embutida_usa_os_schemas_que_estao_ao_lado_dela(caminhos, monkeypatch, tmp_path):
+    """Antes os Schemas eram procurados só em /app/libs: a lib embutida sem nada
+    montado subia dizendo "faltam os Schemas", com eles dentro da imagem."""
+    _montada, embutida = caminhos
+    monkeypatch.delenv("ACBR_SCHEMAS")
+    embutida.write_bytes(b"so")
+    (tmp_path / "Schemas").mkdir()
+
+    escolhida = motor.criar_motor()
+    assert escolhida.caminho == str(embutida) and escolhida.schemas == str(tmp_path / "Schemas")

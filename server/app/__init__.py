@@ -1,1 +1,1 @@
-"""Comunicador ACBrLib do StarChef — ver docs/FISCAL_ACBRLIB.md."""
+"""Comunicador Fiscal ACBrLib — ver server/README.md e docs/INTEGRACAO.md."""

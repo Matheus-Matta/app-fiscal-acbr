@@ -25,7 +25,7 @@
     "wait-on": "^9.5.1"
   },
   "build": {
-    "appId": "br.com.starchef.comunicadorfiscal",
+    "appId": "br.com.comunicadorfiscal.desktop",
     "productName": "Comunicador Fiscal",
     "directories": {
       "output": "dist"

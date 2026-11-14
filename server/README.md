@@ -5,7 +5,7 @@ roda em Docker, num serviço Windows (`.exe`) e dentro do desktop ([`../desktop`
 As chamadas andam cifradas de ponta a ponta. Os dados do emitente (certificado A1, CSC,
 UF, ambiente) podem chegar em cada chamada ou ficar guardados no comunicador, cifrados,
 gravados pelas rotas `/v1/config/*` (o desktop faz isso por você).
-Arquitetura e contingência: [`docs/FISCAL_ACBRLIB.md`](../docs/FISCAL_ACBRLIB.md).
+Como integrar um sistema, contingência e instalação da lib: [`docs/INTEGRACAO.md`](../docs/INTEGRACAO.md).
 
 ## Configuração
 

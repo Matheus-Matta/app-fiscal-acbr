@@ -1,7 +1,7 @@
 """O comunicador de ponta a ponta, com a SEFAZ simulada.
 
 Cada teste é um caminho do plano de contingência visto DO comunicador: o que
-ele responde e com qual `erro`, que é o que o backend classifica.
+ele responde e com qual `erro`, que é o que o cliente classifica.
 """
 INI = """[Identificacao]
 cNF=12345678

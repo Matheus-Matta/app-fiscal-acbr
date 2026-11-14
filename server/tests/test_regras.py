@@ -37,7 +37,7 @@ def test_falha_da_lib_vira_a_familia_certa(mensagem, classe):
     ("Falha na validação do Schema", ""),
 ])
 def test_a_falha_diz_o_motivo_pelo_nome(mensagem, motivo):
-    """O backend mostra ao operador a providência certa, não a frase da lib."""
+    """O cliente mostra ao operador a providência certa, não a frase da lib."""
     assert _classificar(mensagem).motivo == motivo
 
 

@@ -1,6 +1,6 @@
 """A conferência do A1 que chega em cada chamada. Nada é gravado em disco.
 
-As recusas seguem as do StarChef (`acbrlib/certificado.py`) e saem antes de chegar à
+As recusas saem antes de chegar à
 lib, com um `motivo` claro. Viram `configuracao`, nunca contingência: a nota não sai
 em tpEmis=9 por causa de uma senha errada. Nem o arquivo nem a senha vão para a
 mensagem.

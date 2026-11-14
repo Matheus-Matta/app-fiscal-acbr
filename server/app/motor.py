@@ -18,8 +18,8 @@ from app.simulador import Simulador
 def criar_motor():
     if os.environ.get("ACBR_SIMULADOR") == "1":
         return Simulador()
-    # A montada pela loja (/app/libs) vale primeiro; sem ela, a que a Action
-    # embutiu na imagem (/opt/acbr, Secret ACBRLIB_SO_URL do fiscal_acbr.yml).
+    # A montada (/app/libs) vale primeiro; sem ela, a embutida na imagem
+    # (/opt/acbr, copiada de embutida/ no build).
     montada = os.environ.get("ACBR_LIB_PATH", "/app/libs/libacbrnfe64.so")
     embutida = os.environ.get("ACBR_LIB_EMBUTIDA", "/opt/acbr/libacbrnfe64.so")
     caminho = next((c for c in (montada, embutida) if os.path.exists(c)), None)
@@ -27,8 +27,9 @@ def criar_motor():
         return SemLib(montada)
     # A ACBrLib valida o XML contra os Schemas da NF-e ANTES de enviar
     # (`PathSchemas` no ACBrLib.ini). Sem a pasta, toda nota falhava nessa
-    # validação com uma mensagem técnica — melhor dizer o que falta.
-    schemas = os.environ.get("ACBR_SCHEMAS", "/app/libs/Schemas")
+    # validação com uma mensagem técnica — melhor dizer o que falta. Os Schemas
+    # moram ao lado da lib escolhida: /app/libs/Schemas ou /opt/acbr/Schemas.
+    schemas = os.environ.get("ACBR_SCHEMAS") or os.path.join(os.path.dirname(caminho), "Schemas")
     if not os.path.isdir(schemas):
         return SemLib(
             caminho,
@@ -38,7 +39,7 @@ def criar_motor():
     from app import acbrlib
 
     try:
-        return acbrlib.AcbrLib(caminho, os.environ.get("ACBR_CONFIG", "/app/config/ACBrLib.ini"))
+        return acbrlib.AcbrLib(caminho, os.environ.get("ACBR_CONFIG", "/app/config/ACBrLib.ini"), schemas=schemas)
     except (OSError, sefaz.FalhaFiscal) as erro:
         # Arquivo corrompido, de outra arquitetura, ou que não inicializa: sem
         # isto o container caía no boot e reiniciava em laço, calado.
@@ -54,7 +55,7 @@ class SemLib:
         self.mensagem = (
             f"ACBrLib não instalada: {motivo or f'{caminho} não existe'}. Copie a "
             "biblioteca e a pasta Schemas (Projeto ACBr) para a pasta de libs do "
-            "serviço e reinicie (docs/FISCAL_ACBRLIB.md)."
+            "serviço e reinicie (docs/INTEGRACAO.md, \"A ACBrLib\")."
         )
 
     def _recusar(self, _pedido):

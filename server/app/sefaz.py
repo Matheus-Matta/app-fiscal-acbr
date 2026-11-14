@@ -1,4 +1,4 @@
-"""O que um cStat da SEFAZ significa para o backend.
+"""O que um cStat da SEFAZ significa para o cliente.
 
 A ACBrLib devolve `0` quando a CHAMADA deu certo — isso não é autorização. Quem
 diz o destino da nota é o cStat da resposta, e é aqui que ele vira a
