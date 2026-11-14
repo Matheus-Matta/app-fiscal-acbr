@@ -1,0 +1,8 @@
+.env
+__pycache__/
+libs/
+data/
+embutida/*.so*
+windows/lib/
+windows/saida/
+windows/.venv/

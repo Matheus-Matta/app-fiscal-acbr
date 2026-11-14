@@ -1,5 +1,7 @@
-__pycache__
-*.pyc
+tests/
+windows/
+__pycache__/
+libs/
+data/
 .env
-.git
-.gitignore
+*.pyc

@@ -1,0 +1,12 @@
+services:
+  acbr:
+    build: .
+    env_file: .env
+    ports:
+      - "${ACBR_PORTA:-8030}:8030"
+    volumes:
+      # libacbrnfe64.so e a pasta Schemas (Projeto ACBr)
+      - ./libs:/app/libs:ro
+      # Log da lib e XML das notas
+      - ./data:/app/data
+    restart: unless-stopped
