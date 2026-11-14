@@ -17,6 +17,7 @@ Como integrar um sistema, contingência e instalação da lib: [`docs/INTEGRACAO
 | `ACBR_SIMULADOR` | `1` simula a SEFAZ; nada é emitido de verdade. Nunca em produção. |
 | `ACBR_DATA_DIR` | Onde ficam a configuração guardada, o token trocado, o log e os XML. Docker: `/app/data`. |
 | `ACBR_ESPERA_TRAVA` | Segundos que uma chamada espera outra nota terminar (padrão 8). Passou disso: `sem_comunicacao`, motivo `comunicador_ocupado` — nada foi enviado. |
+| `ACBRLIB_PACOTE_URL` / `ACBRLIB_SO_SHA256` | O pacote da ACBrLib que o comunicador baixa, confere e instala sozinho. Ausentes: o de referência (Linux). `ACBRLIB_PACOTE_URL=` vazia desliga. |
 | `ACBR_LIMITE_CORPO` | Tamanho máximo da chamada, em bytes (padrão 8 MB). Acima: 413. |
 
 ### Docker
@@ -26,8 +27,11 @@ cp .env.example .env   # preencha o token e a chave
 docker compose up -d --build
 ```
 
-A API fica na porta `ACBR_PORTA` (padrão 8030). A `libacbrnfe64.so` e a pasta
-`Schemas` vão em `./libs`. O `HEALTHCHECK` da imagem marca o container `unhealthy`
+A API fica na porta `ACBR_PORTA` (padrão 8030). **A ACBrLib se instala sozinha** no
+primeiro início: baixa o pacote de referência (ou o de `ACBRLIB_PACOTE_URL`), confere o
+SHA-256 e a guarda em `./data/lib`. Também vale montar a lib em `./libs` ou embuti-la na
+imagem (`docker build --build-arg ACBRLIB_PACOTE_URL=... --build-arg ACBRLIB_SO_SHA256=...`).
+Detalhes em [`docs/INTEGRACAO.md`](../docs/INTEGRACAO.md#a-acbrlib). O `HEALTHCHECK` da imagem marca o container `unhealthy`
 quando o `/health` responde 503 (lib ausente), sem reiniciá-lo.
 
 Para configurar o emitente sem montar as chamadas na mão, abra o desktop no modo
@@ -99,6 +103,7 @@ Também `POST` e cifradas, com o mesmo token:
 | `/v1/config/emitente` | `cnpj`, `uf`, `ambiente`, `modelo`, `fuso`, `certificado`, `csc` | o mesmo de `ler` |
 | `/v1/config/emitente/remover` | `cnpj` | o mesmo de `ler` |
 | `/v1/config/token` | `token` (vazio: gera um) | `{"token": "..."}` — a única vez que ele aparece |
+| `/v1/config/lib` | `url`, `sha256` (vazios: o pacote configurado) | baixa, confere e instala a ACBrLib, sem reiniciar. Com a lib já carregada: `lib_ja_carregada` |
 
 Em `/v1/config/emitente`, `certificado` ou `csc` ausentes (`null`) mantêm os guardados.
 O A1 é conferido na hora de gravar (senha, validade, CNPJ), com as mesmas recusas da emissão.

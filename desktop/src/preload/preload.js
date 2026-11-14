@@ -11,6 +11,8 @@ contextBridge.exposeInMainWorld('comunicador', {
   trocarToken: (token) => ipcRenderer.invoke('config:token', token),
   statusSefaz: (cnpj) => ipcRenderer.invoke('sefaz:status', cnpj),
   escolherCertificado: () => ipcRenderer.invoke('certificado:escolher'),
+  instalarLib: (dados) => ipcRenderer.invoke('lib:instalar', dados),
+  instalarLibDeArquivo: () => ipcRenderer.invoke('lib:escolher-pacote'),
   lerAcesso: () => ipcRenderer.invoke('acesso:ler'),
   salvarAcesso: (dados) => ipcRenderer.invoke('acesso:salvar', dados),
   reiniciarServidor: () => ipcRenderer.invoke('servidor:reiniciar'),

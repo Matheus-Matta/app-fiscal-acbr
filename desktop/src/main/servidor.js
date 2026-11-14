@@ -96,6 +96,7 @@ class ServidorLocal extends EventEmitter {
   garantirEnv(opcoes = {}) {
     const atual = lerEnv(this.arquivoEnv);
     const valores = {
+      ...atual, // o que não é da tela (ACBRLIB_PACOTE_URL, ACBRLIB_SO_SHA256...) fica
       ACBRLIB_TOKEN: atual.ACBRLIB_TOKEN || gerarToken(),
       ACBR_E2E_KEY: atual.ACBR_E2E_KEY || gerarChave(),
       ACBR_ALLOWED_ORIGINS: opcoes.origens ?? atual.ACBR_ALLOWED_ORIGINS ?? '',
@@ -110,6 +111,43 @@ class ServidorLocal extends EventEmitter {
 
   trocarTokenNoEnv(token) {
     gravarEnv(this.arquivoEnv, { ...lerEnv(this.arquivoEnv), ACBRLIB_TOKEN: token });
+  }
+
+  gravarNoEnv(mudancas) {
+    gravarEnv(this.arquivoEnv, { ...lerEnv(this.arquivoEnv), ...mudancas });
+  }
+
+  /**
+   * Instala a ACBrLib de um pacote (.zip/.tar.gz) deste computador, com o próprio
+   * comunicador (`instalar-lib`): confere o cabeçalho, acha a lib e os Schemas e
+   * troca a pasta lib inteira. Para o comunicador antes — a DLL carregada prende a
+   * pasta — e o reabre depois.
+   */
+  async instalarLibDeArquivo(arquivo, opcoes = {}) {
+    await this.parar();
+    const ambiente = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^ACBR/i.test(k)));
+    const saida = await new Promise((resolve) => {
+      let texto = '';
+      const processo = spawn(this.comando, [...this.argumentos, 'instalar-lib', '--arquivo', arquivo], {
+        env: { ...ambiente, ...this.ambienteExtra, ACBR_DATA_DIR: this.pastaDados, PYTHONIOENCODING: 'utf-8' },
+        cwd: path.dirname(this.comando),
+        windowsHide: true,
+      });
+      processo.stdout.on('data', (d) => { texto += d; });
+      processo.stderr.on('data', (d) => this._registrar(d));
+      processo.on('error', (erro) => resolve(JSON.stringify({ ok: false, mensagem: erro.message })));
+      processo.on('exit', () => resolve(texto));
+    });
+    let resultado;
+    try {
+      resultado = JSON.parse(saida.trim().split(/\r?\n/).pop());
+    } catch {
+      resultado = { ok: false, mensagem: `O instalador não respondeu (${saida.slice(0, 200)}).` };
+    }
+    this._registrar(`--- instalar-lib: ${resultado.mensagem} ---`);
+    this.reinicios = [];
+    await this.iniciar(opcoes);
+    return resultado;
   }
 
   conexao() {

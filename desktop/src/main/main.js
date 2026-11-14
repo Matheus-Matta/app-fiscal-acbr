@@ -256,6 +256,28 @@ function registrarIpc() {
     }
     return { nome: path.basename(arquivo), pfx_base64: fs.readFileSync(arquivo).toString('base64') };
   });
+  // A ACBrLib: baixada e conferida pelo comunicador (app/instalador.py), local ou remoto.
+  tratar('lib:instalar', async ({ url, sha256 } = {}) => {
+    const resposta = await chamar(conexaoAtiva(), '/v1/config/lib', { url: url || '', sha256: sha256 || '' },
+      { tempoLimiteMs: 10 * 60_000 });
+    // Local: o pacote fica no .env, e o comunicador o reinstala sozinho se a lib sumir.
+    if (resposta.ok && url && prefs.ler().modo === 'local') {
+      servidor.gravarNoEnv({ ACBRLIB_PACOTE_URL: url, ACBRLIB_SO_SHA256: sha256 || '' });
+    }
+    return resposta;
+  });
+  tratar('lib:escolher-pacote', async () => {
+    if (prefs.ler().modo !== 'local') {
+      return { ok: false, mensagem: 'No modo remoto, instale pela URL do pacote.' };
+    }
+    const escolha = await dialog.showOpenDialog(janela, {
+      title: 'Pacote da ACBrLib',
+      properties: ['openFile'],
+      filters: [{ name: 'Pacote da ACBrLib (.zip, .tar.gz)', extensions: ['zip', 'gz', 'tgz'] }],
+    });
+    if (escolha.canceled || !escolha.filePaths[0]) return null;
+    return servidor.instalarLibDeArquivo(escolha.filePaths[0], prefs.ler().local);
+  });
   tratar('acesso:ler', lerAcesso);
   tratar('acesso:salvar', async (dados) => {
     const erros = validarAcesso(dados);

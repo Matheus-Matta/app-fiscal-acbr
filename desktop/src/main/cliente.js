@@ -12,7 +12,7 @@ function base(url) {
  * { ok, status, corpo }. `corpo` é o JSON aberto; em falha de rede, `{ erro: 'sem_resposta' }`.
  * Resposta sem envelope (401, 403, erro de sigilo) volta como veio: não traz decisão fiscal.
  */
-async function chamar(conexao, caminho, corpo = {}) {
+async function chamar(conexao, caminho, corpo = {}, { tempoLimiteMs = TEMPO_LIMITE_MS } = {}) {
   if (!conexao.url || !conexao.token || !conexao.chave) {
     return { ok: false, status: 0, corpo: { erro: 'conexao', mensagem: 'Conexão sem URL, token ou chave.' } };
   }
@@ -28,7 +28,7 @@ async function chamar(conexao, caminho, corpo = {}) {
       method: 'POST',
       headers: { Authorization: `Bearer ${conexao.token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(selado.envelope),
-      signal: AbortSignal.timeout(TEMPO_LIMITE_MS),
+      signal: AbortSignal.timeout(tempoLimiteMs),
     });
   } catch (erro) {
     return { ok: false, status: 0, corpo: { erro: 'sem_resposta', mensagem: `O comunicador não respondeu (${erro.message}).` } };

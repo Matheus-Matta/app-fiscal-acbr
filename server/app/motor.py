@@ -15,14 +15,32 @@ from app import sefaz
 from app.simulador import Simulador
 
 
+def _escolher_lib():
+    """A lib que vale: a montada (/app/libs) primeiro, depois a embutida na imagem
+    (/opt/acbr, copiada de embutida/ no build), por fim a que o instalador pôs na
+    pasta de dados. A instalada só vale se ainda for a configurada (SHA-256): se
+    não for, fica de fora e o instalador põe a nova no lugar."""
+    from app import instalador
+
+    instalada = instalador.pasta_instalada()
+    candidatos = [os.environ.get("ACBR_LIB_PATH", "/app/libs/libacbrnfe64.so"),
+                  os.environ.get("ACBR_LIB_EMBUTIDA", "/opt/acbr/libacbrnfe64.so"),
+                  str(instalada / instalador.NOME_LIB)]
+    _url, sha256 = instalador.pacote_configurado()
+    for caminho in candidatos:
+        if not os.path.exists(caminho):
+            continue
+        da_instalada = os.path.abspath(os.path.dirname(caminho)) == os.path.abspath(instalada)
+        if da_instalada and not instalador.instalada_confere(instalada, sha256):
+            continue
+        return caminho, candidatos[0]
+    return None, candidatos[0]
+
+
 def criar_motor():
     if os.environ.get("ACBR_SIMULADOR") == "1":
         return Simulador()
-    # A montada (/app/libs) vale primeiro; sem ela, a embutida na imagem
-    # (/opt/acbr, copiada de embutida/ no build).
-    montada = os.environ.get("ACBR_LIB_PATH", "/app/libs/libacbrnfe64.so")
-    embutida = os.environ.get("ACBR_LIB_EMBUTIDA", "/opt/acbr/libacbrnfe64.so")
-    caminho = next((c for c in (montada, embutida) if os.path.exists(c)), None)
+    caminho, montada = _escolher_lib()
     if caminho is None:
         return SemLib(montada)
     # A ACBrLib valida o XML contra os Schemas da NF-e ANTES de enviar
@@ -52,11 +70,17 @@ class SemLib:
     nome = "ausente"
 
     def __init__(self, caminho, motivo=None):
-        self.mensagem = (
-            f"ACBrLib não instalada: {motivo or f'{caminho} não existe'}. Copie a "
-            "biblioteca e a pasta Schemas (Projeto ACBr) para a pasta de libs do "
-            "serviço e reinicie (docs/INTEGRACAO.md, \"A ACBrLib\")."
+        self.base = (
+            f"ACBrLib não instalada: {motivo or f'{caminho} não existe'}. Configure o pacote "
+            "(ACBRLIB_PACOTE_URL e ACBRLIB_SO_SHA256) para o comunicador instalá-la sozinho, "
+            "ou copie a biblioteca e a pasta Schemas (Projeto ACBr) para a pasta de libs e "
+            "reinicie (docs/INTEGRACAO.md, \"A ACBrLib\")."
         )
+        self.mensagem = self.base
+
+    def informar_instalacao(self, texto):
+        """O andamento da instalação automática, na frente da providência."""
+        self.mensagem = f"{texto} {self.base}" if texto else self.base
 
     def _recusar(self, _pedido):
         raise sefaz.FalhaDeConfiguracao(self.mensagem, "acbrlib_ausente")

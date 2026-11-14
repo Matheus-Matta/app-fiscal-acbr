@@ -98,17 +98,36 @@ retransmite sozinho — o cliente agenda a transmissão das pendentes.
 
 ## A ACBrLib
 
-A biblioteca é do Projeto ACBr, tem licença própria e **não vem neste repositório**.
-Obtenha a distribuição da ACBrLibNFe (versão MT) e use:
+A biblioteca é do Projeto ACBr, tem licença própria e não é versionada aqui. **O
+comunicador a instala sozinho** ([`server/app/instalador.py`](../server/app/instalador.py)):
 
-| Onde roda | Arquivos | Pasta |
+1. Sem lib, ele baixa o pacote de `ACBRLIB_PACOTE_URL` (`.tar.gz` ou `.zip`; link do
+   MediaFire aceito — o direto é lido da página).
+2. Confere a lib pelo **SHA-256** (`ACBRLIB_SO_SHA256`) e pelo cabeçalho (ELF no Linux, MZ
+   no Windows). Uma página de erro, um download pela metade ou uma lib trocada viram
+   aviso — nunca uma lib carregada.
+3. Põe a lib, as que a acompanham e os `.xsd` de `Schemas/NFe` em `<dados>/lib`, inteira ou
+   nada, e passa a emitir **sem reiniciar**. Já instalada e conferida, não baixa de novo;
+   trocar o `ACBRLIB_SO_SHA256` (e o pacote) reinstala.
+4. Nunca derruba o comunicador: falhou, o `/health` diz por quê.
+
+Sem a variável, vale o **pacote de referência**: ACBrLibNFe 1.5.0.488, Linux x64 (MT),
+SHA-256 `deec61a921b830516ad3d7f5833aee7cb69603391eb497e649296ecc5522b3f0`. **Para Windows
+não há pacote de referência**: monte um `.zip` com `ACBrNFe64.dll`, as DLLs que a
+acompanham e `Schemas/NFe`, hospede-o e informe URL e SHA-256 (no desktop, na tela Status).
+`ACBRLIB_PACOTE_URL=` (vazia) desliga a instalação automática.
+
+Onde a lib pode estar, na ordem em que vale:
+
+| | Docker | Desktop / serviço Windows |
 |---|---|---|
-| Docker (Linux) | `libacbrnfe64.so` + `Schemas/` | `./libs` (montada em `/app/libs`), ou `embutida/` antes do `docker build` |
-| Desktop | `ACBrNFe64.dll` + DLLs que a acompanham + `Schemas/` | `%APPDATA%\Comunicador Fiscal\servidor\lib` |
-| Serviço Windows | os mesmos do desktop | `windows\lib` antes de gerar o instalador, ou `%PROGRAMDATA%\AcbrFiscal\lib` |
+| montada / ao lado do programa | `./libs` → `/app/libs` | `windows\lib` no build (vai junto no `.exe`) |
+| embutida na imagem | `embutida/`, `--build-arg ACBRLIB_PACOTE_URL`, ou a Action `imagem.yml` | — |
+| instalada pelo comunicador | `/app/data/lib` (volume) | `%APPDATA%\Comunicador Fiscal\servidor\lib` / `%PROGRAMDATA%\AcbrFiscal\lib` |
 
-`Schemas/` é o conteúdo de `Schemas/NFe` da distribuição: sem ele, a validação recusa
-toda nota. Sem a lib, o comunicador sobe e explica o que falta (`/health` 503).
+Também à mão: `python -m app.instalador --url URL --sha256 HASH` (ou `--arquivo pacote.zip`),
+`AcbrFiscal.exe instalar-lib ...`, a rota `POST /v1/config/lib {url, sha256}` ou os botões
+da tela Status do desktop. Os Schemas valem os que estão ao lado da lib escolhida.
 
 Detalhes que já custaram nota recusada:
 

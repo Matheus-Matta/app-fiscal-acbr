@@ -26,10 +26,17 @@ if ($LASTEXITCODE) { throw "pip falhou" }
     --distpath $saida --workpath $trabalho --specpath $trabalho `
     --paths $servidor `
     --add-data "$servidor\config\ACBrLib.ini;config" `
-    --hidden-import app.simulador --hidden-import app.acbrlib --hidden-import app.configuracao `
+    --hidden-import app.simulador --hidden-import app.acbrlib --hidden-import app.configuracao --hidden-import app.instalador `
     --collect-submodules uvicorn `
     (Join-Path $PSScriptRoot "servico.py")
 if ($LASTEXITCODE) { throw "PyInstaller falhou" }
+
+# A lib de Windows, se estiver em windows\lib, vai junto (o comunicador a acha ao lado do .exe).
+$lib = Join-Path $PSScriptRoot "lib"
+if (Test-Path (Join-Path $lib "ACBrNFe64.dll")) {
+    Copy-Item -Recurse -Force $lib (Join-Path $saida "AcbrFiscal\lib")
+    Write-Host "ACBrLib embutida de $lib"
+}
 
 if ($SoExe) {
     Get-Item (Join-Path $saida "AcbrFiscal\AcbrFiscal.exe") | Select-Object FullName, Length

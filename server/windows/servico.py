@@ -7,6 +7,7 @@ ACBR_DATA_DIR apontando para a pasta do usuário e grava o .env antes.
     AcbrFiscal.exe                    sobe a API
     AcbrFiscal.exe instalar-tarefa    sobe sozinho com o Windows (pede administrador)
     AcbrFiscal.exe remover-tarefa
+    AcbrFiscal.exe instalar-lib [--url URL --sha256 HASH | --arquivo PACOTE]
 
 O .env fica em %PROGRAMDATA%\\AcbrFiscal, legível só pelo serviço, pelos
 administradores e por quem configurou.
@@ -129,7 +130,7 @@ def _preparar_ambiente():
     ini.write_text(base.replace("/app/data", str(dados)).replace("/app/libs", str(lib)), encoding="utf-8")
     os.environ.setdefault("ACBR_LIB_PATH", str(lib / "ACBrNFe64.dll"))
     os.environ.setdefault("ACBR_LIB_EMBUTIDA", str(lib / "ACBrNFe64.dll"))
-    os.environ.setdefault("ACBR_SCHEMAS", str(lib / "Schemas"))
+    # Os Schemas: os que estão ao lado da lib escolhida (app/motor.py).
     os.environ.setdefault("ACBR_CONFIG", str(ini))
 
 
@@ -174,6 +175,16 @@ def remover_tarefa():
     subprocess.run(["schtasks", "/Delete", "/F", "/TN", TAREFA], check=False)
 
 
+def instalar_lib(url=None, arquivo=None, sha256=None):
+    r"""A ACBrLib em <dados>\lib, como o comunicador faz sozinho ao subir (app/instalador.py)."""
+    os.environ.setdefault("ACBR_DATA_DIR", str(pasta_dados()))
+    argumentos = [*(["--url", url] if url else []), *(["--arquivo", arquivo] if arquivo else []),
+                  *(["--sha256", sha256] if sha256 else []), "--destino", str(pasta_dados() / "lib")]
+    from app import instalador
+
+    raise SystemExit(instalador.main(argumentos))
+
+
 def main(argv=None):
     leitor = argparse.ArgumentParser(prog="AcbrFiscal", description="Comunicador ACBrLib local.")
     comandos = leitor.add_subparsers(dest="comando")
@@ -185,6 +196,10 @@ def main(argv=None):
     conf.add_argument("--simulador", action="store_true", help="SEFAZ simulada; nada é emitido de verdade")
     comandos.add_parser("instalar-tarefa")
     comandos.add_parser("remover-tarefa")
+    lib = comandos.add_parser("instalar-lib", help="baixa (ou abre) o pacote da ACBrLib, confere e instala")
+    lib.add_argument("--url")
+    lib.add_argument("--arquivo")
+    lib.add_argument("--sha256")
     argumentos = leitor.parse_args(argv)
 
     if argumentos.comando == "configurar":
@@ -193,6 +208,8 @@ def main(argv=None):
         instalar_tarefa()
     elif argumentos.comando == "remover-tarefa":
         remover_tarefa()
+    elif argumentos.comando == "instalar-lib":
+        instalar_lib(argumentos.url, argumentos.arquivo, argumentos.sha256)
     else:
         servir()
 

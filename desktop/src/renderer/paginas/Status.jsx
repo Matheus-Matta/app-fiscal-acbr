@@ -1,8 +1,105 @@
 import { useEffect, useState } from 'react';
-import { api, Aviso, Cartao, Indicador, mensagemDe } from '../comum';
+import { api, Aviso, Campo, Cartao, Indicador, mensagemDe } from '../comum';
 
 const MOTOR = { acbrlib: 'ACBrLib', simulador: 'SEFAZ simulada', ausente: 'ACBrLib não instalada' };
 const SITUACAO = { parado: 'Parado', iniciando: 'Iniciando', rodando: 'Rodando', erro: 'Com erro' };
+
+/** A ACBrLib: o comunicador a baixa, confere o SHA-256 e instala sozinho (server/app/instalador.py). */
+function Biblioteca({ estado, atualizar, lib }) {
+  const local = estado.modo === 'local';
+  const alcancado = Boolean(estado.saude?.alcancado);
+  const carregada = Boolean(estado.saude?.lib);
+  const [info, setInfo] = useState(null);
+  const [url, setUrl] = useState('');
+  const [sha, setSha] = useState('');
+  const [trabalhando, setTrabalhando] = useState('');
+  const [retorno, setRetorno] = useState(null);
+
+  useEffect(() => {
+    if (!alcancado) return;
+    api.lerConfig().then((resposta) => {
+      if (!resposta.ok) return;
+      setInfo(resposta.corpo.lib);
+      setUrl((atual) => atual || resposta.corpo.lib.pacote_url || '');
+      setSha((atual) => atual || resposta.corpo.lib.sha256 || '');
+    });
+  }, [alcancado, carregada]);
+
+  const instalar = async () => {
+    setTrabalhando('baixando');
+    setRetorno(null);
+    const resposta = await api.instalarLib({ url: url.trim(), sha256: sha.trim() });
+    setTrabalhando('');
+    setRetorno(resposta.ok
+      ? { tipo: 'ok', texto: `${resposta.corpo.mensagem} Conferida pelo SHA-256.` }
+      : { tipo: 'erro', texto: mensagemDe(resposta) });
+    atualizar();
+  };
+
+  const escolher = async () => {
+    setTrabalhando('arquivo');
+    setRetorno(null);
+    const resultado = await api.instalarLibDeArquivo();
+    setTrabalhando('');
+    if (!resultado) return;
+    setRetorno(resultado.ok
+      ? { tipo: 'ok', texto: `${resultado.mensagem} SHA-256 da lib: ${resultado.sha256}` }
+      : { tipo: 'erro', texto: resultado.mensagem });
+    atualizar();
+  };
+
+  return (
+    <Cartao
+      titulo="Biblioteca ACBr"
+      acoes={local && (
+        <button type="button" className="botao" onClick={() => api.abrirPasta('lib')}>Abrir pasta</button>
+      )}
+    >
+      {carregada ? (
+        <Aviso tipo="ok">ACBrLib carregada: o comunicador assina e transmite de verdade.</Aviso>
+      ) : (
+        <>
+          {info?.situacao === 'instalando' && <Aviso tipo="info">Baixando e instalando a ACBrLib…</Aviso>}
+          {info?.situacao === 'falhou' && <Aviso tipo="erro">A instalação automática falhou: {info.mensagem}</Aviso>}
+          <p className="nota">
+            A ACBrLib (Projeto ACBr) é baixada, conferida pelo SHA-256 e instalada pelo próprio comunicador. Informe o
+            endereço do pacote (.zip ou .tar.gz, link do MediaFire aceito) e o SHA-256 da lib
+            {local && ', ou escolha um pacote já baixado neste computador'}.
+          </p>
+          <div className="grade">
+            <Campo rotulo="Endereço do pacote" largo>
+              <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…/acbrlib-windows-x64.zip" />
+            </Campo>
+            <Campo rotulo="SHA-256 da lib" ajuda="Sem ele o download não é aceito: é o que garante que a lib é a certa." largo>
+              <input value={sha} onChange={(e) => setSha(e.target.value)} placeholder="64 caracteres hexadecimais" />
+            </Campo>
+          </div>
+          <div className="linha-acoes acoes-lib">
+            <button type="button" className="botao botao-primario" onClick={instalar}
+              disabled={Boolean(trabalhando) || !alcancado || !url.trim() || !sha.trim()}>
+              {trabalhando === 'baixando' ? 'Baixando e conferindo…' : 'Baixar e instalar'}
+            </button>
+            {local && (
+              <button type="button" className="botao" onClick={escolher} disabled={Boolean(trabalhando)}>
+                {trabalhando === 'arquivo' ? 'Instalando…' : 'Escolher pacote no computador…'}
+              </button>
+            )}
+          </div>
+        </>
+      )}
+      <Aviso tipo={retorno?.tipo}>{retorno?.texto}</Aviso>
+      {local && (
+        <>
+          <ul className="lista-conferencia">
+            <li className={lib.dll ? 'ok' : 'falta'}>ACBrNFe64.dll e as DLLs que a acompanham</li>
+            <li className={lib.schemas ? 'ok' : 'falta'}>Pasta Schemas (Schemas/NFe da distribuição da ACBr)</li>
+          </ul>
+          <p className="nota">Pasta: <code>{estado.pastas.lib}</code></p>
+        </>
+      )}
+    </Cartao>
+  );
+}
 
 export default function Status({ estado, atualizar }) {
   const [teste, setTeste] = useState(null);
@@ -79,27 +176,7 @@ export default function Status({ estado, atualizar }) {
         </Aviso>
       </Cartao>
 
-      {local && (
-        <Cartao
-          titulo="Biblioteca ACBr"
-          acoes={
-            <button type="button" className="botao" onClick={() => api.abrirPasta('lib')}>
-              Abrir pasta
-            </button>
-          }
-        >
-          <ul className="lista-conferencia">
-            <li className={lib.dll ? 'ok' : 'falta'}>ACBrNFe64.dll e as DLLs que a acompanham</li>
-            <li className={lib.schemas ? 'ok' : 'falta'}>Pasta Schemas (Schemas/NFe da distribuição da ACBr)</li>
-          </ul>
-          <p className="nota">
-            Pasta: <code>{estado.pastas.lib}</code>
-            <br />
-            A biblioteca é distribuída pelo Projeto ACBr e não vem junto. Copie os arquivos para essa pasta e clique em
-            Reiniciar.
-          </p>
-        </Cartao>
-      )}
+      <Biblioteca estado={estado} atualizar={atualizar} lib={lib} />
 
       <Cartao
         titulo="SEFAZ"

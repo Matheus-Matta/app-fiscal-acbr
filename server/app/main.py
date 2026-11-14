@@ -9,6 +9,7 @@ que o cliente classifica: é o que decide contingência (`sem_comunicacao`), con
 import json
 import logging
 import os
+import threading
 import time
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
@@ -16,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
-from app import certificados, configuracao, modelos, sefaz, sigilo
+from app import certificados, configuracao, instalador, modelos, sefaz, sigilo
 from app.motor import criar_motor
 
 log = logging.getLogger("acbr")
@@ -99,6 +100,50 @@ async def _falha(request, erro):
     return _selado(request, status, {"erro": codigo, "motivo": erro.motivo, "mensagem": str(erro)})
 
 
+# ── a ACBrLib instalada sozinha (app/instalador.py) ──────────────────────────
+_instalacao = {"situacao": "parada", "mensagem": ""}
+_trava_instalacao = threading.Lock()
+
+
+def _instalar(url=None, sha256=None):
+    """Baixa, confere e instala; depois troca o motor, sem reiniciar. Uma por vez."""
+    global motor
+    if not _trava_instalacao.acquire(blocking=False):
+        raise sefaz.FalhaDeConfiguracao("Já há uma instalação da ACBrLib em andamento.", "instalacao_em_andamento")
+    try:
+        _instalacao.update(situacao="instalando", mensagem="Baixando e instalando a ACBrLib…")
+        if motor.nome == "ausente":
+            motor.informar_instalacao("Instalando a ACBrLib agora…")
+        try:
+            resultado = instalador.instalar(url=url, sha256=sha256)
+        except instalador.FalhaNaInstalacao as erro:
+            _instalacao.update(situacao="falhou", mensagem=str(erro))
+            if motor.nome == "ausente":
+                motor.informar_instalacao(f"A instalação automática falhou: {erro}")
+            raise sefaz.FalhaDeConfiguracao(str(erro), "instalacao_falhou") from None
+        _instalacao.update(situacao="instalada", mensagem=resultado["mensagem"])
+        if motor.nome != "simulador":
+            motor = criar_motor()
+        return resultado
+    finally:
+        _trava_instalacao.release()
+
+
+def _instalar_ao_subir():
+    try:
+        _instalar()
+    except sefaz.FalhaFiscal as erro:
+        log.warning("ACBrLib não instalada automaticamente: %s", erro)
+    except Exception:  # a instalação nunca derruba o comunicador
+        log.exception("falha inesperada ao instalar a ACBrLib")
+
+
+# Sem lib e com pacote configurado: instala em segundo plano. O comunicador já
+# responde enquanto isso (o /health diz "Instalando a ACBrLib agora…").
+if motor.nome == "ausente" and instalador.precisa_instalar():
+    threading.Thread(target=_instalar_ao_subir, name="instalar-acbrlib", daemon=True).start()
+
+
 @app.get("/health")
 def health():
     corpo = {"ok": motor.nome != "ausente", "motor": motor.nome, "lib": motor.nome == "acbrlib",
@@ -162,11 +207,25 @@ _rota("/v1/nfe/cancelar", modelos.Cancelar, _fiscal("cancelar"))
 
 # ── configuração (desktop e painel) ──────────────────────────────────────────
 def _ler_config(_pedido):
-    return {**configuracao.resumo(), "motor": motor.nome}
+    url, sha256 = instalador.pacote_configurado()
+    lib = {"pacote_url": url, "sha256": sha256, **_instalacao}
+    if motor.nome == "ausente":
+        lib["mensagem_motor"] = motor.mensagem
+    return {**configuracao.resumo(), "motor": motor.nome, "lib": lib}
+
+
+def _instalar_pela_api(pedido):
+    if motor.nome == "acbrlib":
+        raise sefaz.FalhaDeConfiguracao(
+            "A ACBrLib já está carregada. Para trocar de versão, mude ACBRLIB_PACOTE_URL e "
+            "ACBRLIB_SO_SHA256 e reinicie o comunicador: ele instala a nova sozinho.", "lib_ja_carregada")
+    resultado = _instalar(pedido.url or None, pedido.sha256 or None)
+    return {**resultado, "motor": motor.nome}
 
 
 _rota("/v1/config/ler", modelos.Vazio, _ler_config)
 _rota("/v1/config/emitente", modelos.Emitente, configuracao.salvar_emitente)
+_rota("/v1/config/lib", modelos.InstalarLib, _instalar_pela_api)
 _rota("/v1/config/emitente/remover", modelos.RemoverEmitente, lambda p: configuracao.remover_emitente(p.cnpj))
 # O novo token só aparece nesta resposta, cifrada. O anterior deixa de valer na hora.
 _rota("/v1/config/token", modelos.TrocarToken, lambda p: {"token": configuracao.trocar_token(p.token)})

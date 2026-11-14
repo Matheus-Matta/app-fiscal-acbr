@@ -38,6 +38,13 @@ def _texto(corpo):
     return json.dumps(corpo).encode()
 
 
+@pytest.fixture(autouse=True)
+def _sem_download(monkeypatch, tmp_path):
+    """Nenhum teste baixa a ACBrLib de verdade: o pacote padrão fica desligado."""
+    monkeypatch.setenv("ACBRLIB_PACOTE_URL", "")
+    monkeypatch.setenv("ACBR_LIB_INSTALADA", str(tmp_path / "lib-instalada"))
+
+
 @pytest.fixture
 def ambiente(monkeypatch, tmp_path):
     # A configuração guardada (emitentes, token) de cada teste fica no seu tmp_path.

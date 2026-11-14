@@ -1,0 +1,90 @@
+name: Imagem
+
+# Publica a imagem do comunicador em ghcr.io/<dono>/comunicador-fiscal.
+#
+# * tag vX.Y.Z: publica `X.Y.Z`, `X.Y` e `latest`;
+# * botão "Run workflow": publica `manual` e `sha-<commit>`, sem mexer no `latest`.
+#
+# A ACBrLib (Projeto ACBr, licença própria) não é versionada. Com o Secret
+# `ACBRLIB_PACOTE_URL` e a Variable `ACBRLIB_SO_SHA256`, ela é baixada, conferida e
+# EMBUTIDA na imagem (/opt/acbr) — confira a licença antes de publicar a imagem num
+# registro público. Sem o Secret, a imagem sai sem a lib e cada instalação a baixa
+# sozinha ao subir (app/instalador.py).
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*.*.*"]
+
+jobs:
+  testes:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements-dev.txt
+      - run: ruff check .
+      - run: pytest tests -q
+
+  publicar:
+    needs: testes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/comunicador-fiscal
+          flavor: |
+            latest=false
+          tags: |
+            type=sha,format=short
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
+            type=raw,value=manual,enable=${{ github.event_name == 'workflow_dispatch' }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Antes do build, para a pasta embutida/: um --build-arg ficaria gravado no
+      # histórico da imagem (docker history), e o link do pacote pode ser privado.
+      - name: Embutir a ACBrLib (opcional)
+        working-directory: server
+        env:
+          ACBRLIB_PACOTE_URL: ${{ secrets.ACBRLIB_PACOTE_URL }}
+          ACBRLIB_SO_SHA256: ${{ vars.ACBRLIB_SO_SHA256 }}
+        run: |
+          if [ -z "$ACBRLIB_PACOTE_URL" ]; then
+            echo "::notice::Sem o Secret ACBRLIB_PACOTE_URL: imagem sem a lib (cada instalação a baixa ao subir)."
+            exit 0
+          fi
+          # O instalador só usa a biblioteca padrão do Python: confere SHA-256 e cabeçalho ELF.
+          python -m app.instalador --url "$ACBRLIB_PACOTE_URL" --sha256 "$ACBRLIB_SO_SHA256" --destino embutida
+          echo "::notice::ACBrLib embutida na imagem."
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: server
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

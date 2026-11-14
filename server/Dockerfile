@@ -1,13 +1,12 @@
 # Comunicador Fiscal ACBrLib (server/README.md, docs/INTEGRACAO.md).
 #
 # Debian, e não Alpine: a libacbrnfe64.so é compilada contra a glibc. A lib NÃO
-# vem no repositório: é montada em /app/libs ou copiada de embutida/ para /opt/acbr.
+# vem no repositório: o comunicador a baixa e confere sozinho (app/instalador.py).
 FROM python:3.12-slim-bookworm
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     ACBR_DATA_DIR=/app/data \
-    LD_LIBRARY_PATH=/app/libs:/opt/acbr \
     ACBR_LIB_PATH=/app/libs/libacbrnfe64.so \
     ACBR_CONFIG=/app/config/ACBrLib.ini \
     TZ=America/Sao_Paulo
@@ -35,15 +34,27 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app/ ./app/
 COPY config/ ./config/
 
-# A lib EMBUTIDA, quando alguém a pôs em embutida/ antes do build: sem ela a
-# pasta só tem o LEIAME, e a lib é montada em /app/libs.
+# Onde a ACBrLib pode estar, na ordem em que vale (app/motor.py):
+#   1. /app/libs      montada pela instalação (volume ./libs)
+#   2. /opt/acbr      EMBUTIDA na imagem: a que estiver em embutida/, ou a baixada
+#                     no build com --build-arg ACBRLIB_PACOTE_URL e ACBRLIB_SO_SHA256
+#   3. /app/data/lib  instalada sozinha ao subir, do mesmo pacote (padrão: o de referência)
+# O --build-arg fica no histórico da imagem (docker history): com link privado,
+# baixe antes com `python -m app.instalador --destino embutida` (a Action faz assim).
 COPY embutida/ /opt/acbr/
+ARG ACBRLIB_PACOTE_URL=""
+ARG ACBRLIB_SO_SHA256=""
+RUN if [ -n "$ACBRLIB_PACOTE_URL" ]; then \
+        python -m app.instalador --url "$ACBRLIB_PACOTE_URL" --sha256 "$ACBRLIB_SO_SHA256" --destino /opt/acbr; \
+    fi
+ENV LD_LIBRARY_PATH=/app/libs:/opt/acbr:/app/data/lib
 
 EXPOSE 8030
 
 # Sem isto o 503 do /health (lib ausente) não aparecia no `docker ps`. A imagem slim
 # não tem curl: o próprio Python confere. Não reinicia sozinho — só fica visível.
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+# O start-period cobre o primeiro download da lib.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
     CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8030/health', timeout=4)"]
 
 # UM worker: a ACBrLib não é reentrante para o mesmo handle (`app/acbrlib.py`).

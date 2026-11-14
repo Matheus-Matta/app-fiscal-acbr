@@ -22,14 +22,18 @@ e a chave do `.env` dele. O comunicador local fica desligado.
 
 ## A biblioteca ACBr
 
-Ela não vem junto (é distribuída pelo Projeto ACBr). Copie `ACBrNFe64.dll`, as DLLs que a
-acompanham e a pasta `Schemas` para:
+O comunicador a baixa, confere pelo SHA-256 e instala sozinho, sem reiniciar. Na tela
+**Status**, cartão "Biblioteca ACBr":
 
-```
-%APPDATA%\Comunicador Fiscal\servidor\lib
-```
+- **Baixar e instalar**: o endereço do pacote (`.zip`/`.tar.gz`, link do MediaFire aceito) e
+  o SHA-256 da lib. Fica gravado no `.env`: se a lib sumir, ele a reinstala ao abrir.
+- **Escolher pacote no computador…**: um pacote já baixado.
 
-O botão "Abrir pasta", na tela Status, abre essa pasta. Depois clique em **Reiniciar**.
+O pacote de Windows tem `ACBrNFe64.dll`, as DLLs que a acompanham e `Schemas/NFe`. Com a
+lib em `server\windows\lib` na hora do `npm run build:tudo`, ela já vai dentro do `.exe`.
+Ela fica em `%APPDATA%\Comunicador Fiscal\servidor\lib` ("Abrir pasta").
+
+No modo remoto, "Baixar e instalar" instala no Docker.
 
 Na mesma pasta `servidor` ficam o `.env` (token e chave gerados na primeira vez), a
 configuração guardada (`configuracao.bin`, cifrada), o log e os XML.

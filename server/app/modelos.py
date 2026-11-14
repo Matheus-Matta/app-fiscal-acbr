@@ -96,5 +96,12 @@ class TrocarToken(BaseModel):
     token: str = ""
 
 
+class InstalarLib(BaseModel):
+    """Vazios: o pacote configurado no ambiente (ACBRLIB_PACOTE_URL/ACBRLIB_SO_SHA256)."""
+
+    url: str = ""
+    sha256: str = ""
+
+
 class Vazio(BaseModel):
     pass
