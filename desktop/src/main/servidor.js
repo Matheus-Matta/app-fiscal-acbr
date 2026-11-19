@@ -1,4 +1,4 @@
-// O comunicador local: o mesmo AcbrFiscal.exe do serviço Windows (server/windows/servico.py),
+// O comunicador local: o mesmo AcbrFiscal[.exe] do serviço Windows (server/windows/servico.py),
 // aberto como processo filho, com a pasta de dados do usuário e o .env que o desktop grava.
 const { execFileSync, spawn } = require('node:child_process');
 const crypto = require('node:crypto');
@@ -15,7 +15,7 @@ const REINICIOS_POR_MINUTO = 5;
 function lerEnv(arquivo) {
   if (!fs.existsSync(arquivo)) return {};
   const valores = {};
-  for (const bruta of fs.readFileSync(arquivo, 'utf8').split(/\r?\n/)) {
+  for (const bruta of fs.readFileSync(arquivo, 'utf8').replace(/^﻿/, '').split(/\r?\n/)) {
     const linha = bruta.trim();
     if (!linha || linha.startsWith('#') || !linha.includes('=')) continue;
     const i = linha.indexOf('=');
@@ -70,7 +70,7 @@ class ServidorLocal extends EventEmitter {
   /**
    * @param {object} o
    * @param {string} o.pastaDados  ACBR_DATA_DIR: .env, configuração guardada, log, lib
-   * @param {string} o.comando     o AcbrFiscal.exe (ou o python, no desenvolvimento)
+   * @param {string} o.comando     o AcbrFiscal[.exe] (ou o python, no desenvolvimento)
    * @param {string[]} [o.argumentos]
    * @param {object} [o.ambienteExtra]
    */
@@ -92,13 +92,17 @@ class ServidorLocal extends EventEmitter {
     return path.join(this.pastaDados, 'lib');
   }
 
-  /** Lê o .env, gera token e chave na primeira vez e grava as opções da tela. */
+  /** Lê o .env, gera token e chave do cofre na primeira vez e grava as opções da tela. */
   garantirEnv(opcoes = {}) {
-    const atual = lerEnv(this.arquivoEnv);
+    const { ACBR_E2E_KEY: chaveAntiga, ...atual } = lerEnv(this.arquivoEnv);
     const valores = {
       ...atual, // o que não é da tela (ACBRLIB_PACOTE_URL, ACBRLIB_SO_SHA256...) fica
+      // Local: o PDV usa só o token; o emitente fica guardado no comunicador.
+      ACBR_MODO: 'local',
       ACBRLIB_TOKEN: atual.ACBRLIB_TOKEN || gerarToken(),
-      ACBR_E2E_KEY: atual.ACBR_E2E_KEY || gerarChave(),
+      // As versões anteriores cifravam o cofre com a ACBR_E2E_KEY: ela vira a chave do
+      // cofre, e os emitentes já guardados continuam abrindo.
+      ACBR_CHAVE_COFRE: atual.ACBR_CHAVE_COFRE || chaveAntiga || gerarChave(),
       ACBR_ALLOWED_ORIGINS: opcoes.origens ?? atual.ACBR_ALLOWED_ORIGINS ?? '',
       ACBR_SIMULADOR: (opcoes.simulador ?? atual.ACBR_SIMULADOR === '1') ? '1' : '0',
       ACBR_PORT: String(opcoes.porta ?? atual.ACBR_PORT ?? 8030),
@@ -155,7 +159,6 @@ class ServidorLocal extends EventEmitter {
     return {
       url: `http://127.0.0.1:${env.ACBR_PORT || 8030}`,
       token: env.ACBRLIB_TOKEN || '',
-      chave: env.ACBR_E2E_KEY || '',
     };
   }
 
@@ -205,7 +208,7 @@ class ServidorLocal extends EventEmitter {
     if (!(await portaLivre(porta, env.ACBR_HOST))) {
       this._mudar(
         'erro',
-        `A porta ${porta} já está em uso — outro Comunicador ou o serviço Windows AcbrFiscal? ` +
+        `A porta ${porta} já está em uso — outro Comunicador (ou o serviço AcbrFiscal) já aberto? ` +
           'Feche-o ou troque a porta em Acesso.',
       );
       return;

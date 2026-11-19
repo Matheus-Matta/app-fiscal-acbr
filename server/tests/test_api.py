@@ -24,7 +24,7 @@ def test_sem_token_recusa(api):
 
 
 def test_health_diz_que_e_simulador(api):
-    assert api.get("/health").json() == {"ok": True, "motor": "simulador", "lib": False,
+    assert api.get("/health").json() == {"ok": True, "modo": "nuvem", "motor": "simulador", "lib": False,
                                          "simulador": True}
 
 

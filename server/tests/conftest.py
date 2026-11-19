@@ -12,8 +12,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app import sigilo  # noqa: E402
 
-TOKEN = "token-de-teste"
+#: A nuvem não sobe com token de menos de 32 caracteres.
+TOKEN = "token-de-teste-com-32-caracteres-ou-mais"
 CHAVE_E2E = base64.b64encode(b"e" * 32).decode()
+CHAVE_COFRE = base64.b64encode(b"k" * 32).decode()
+#: O IP de quem chama no modo local: o próprio computador.
+DESTA_MAQUINA = ("127.0.0.1", 50000)
 
 
 class ClienteSelado(TestClient):
@@ -47,16 +51,20 @@ def _sem_download(monkeypatch, tmp_path):
 
 @pytest.fixture
 def ambiente(monkeypatch, tmp_path):
+    """O modo nuvem: token forte e chave de ponta a ponta."""
     # A configuração guardada (emitentes, token) de cada teste fica no seu tmp_path.
     monkeypatch.setenv("ACBR_DATA_DIR", str(tmp_path / "dados"))
+    monkeypatch.setenv("ACBR_MODO", "nuvem")
     monkeypatch.setenv("ACBRLIB_TOKEN", TOKEN)
     monkeypatch.setenv("ACBR_E2E_KEY", CHAVE_E2E)
+    monkeypatch.delenv("ACBR_CHAVE_COFRE", raising=False)
+    monkeypatch.delenv("ACBR_CONFIG_REDES", raising=False)
     monkeypatch.setenv("ACBR_ALLOWED_ORIGINS", "https://caixa.exemplo.com.br")
 
 
 @pytest.fixture
 def api(ambiente, monkeypatch):
-    """O comunicador com a SEFAZ simulada, como sobe com ACBR_SIMULADOR=1."""
+    """O comunicador na nuvem, com a SEFAZ simulada, como sobe com ACBR_SIMULADOR=1."""
     monkeypatch.setenv("ACBR_SIMULADOR", "1")
     import app.main
 
@@ -64,3 +72,30 @@ def api(ambiente, monkeypatch):
     cliente = ClienteSelado(modulo.app)
     cliente.headers["Authorization"] = f"Bearer {TOKEN}"
     return cliente
+
+
+@pytest.fixture
+def ambiente_local(ambiente, monkeypatch):
+    """O modo local: só o token, e a chave do cofre dos emitentes."""
+    monkeypatch.setenv("ACBR_MODO", "local")
+    monkeypatch.delenv("ACBR_E2E_KEY", raising=False)
+    monkeypatch.setenv("ACBR_CHAVE_COFRE", CHAVE_COFRE)
+
+
+def cliente_local(client=DESTA_MAQUINA):
+    """Fala com o comunicador local como o PDV: JSON comum e o token."""
+    import app.main
+
+    cliente = TestClient(app.main.app, client=client)
+    cliente.headers["Authorization"] = f"Bearer {TOKEN}"
+    return cliente
+
+
+@pytest.fixture
+def api_local(ambiente_local, monkeypatch):
+    """O comunicador local, chamado do próprio computador, com a SEFAZ simulada."""
+    monkeypatch.setenv("ACBR_SIMULADOR", "1")
+    import app.main
+
+    importlib.reload(app.main)
+    return cliente_local()

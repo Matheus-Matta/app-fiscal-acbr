@@ -1,0 +1,11 @@
+﻿ACBrLibNFe para Windows x64 (modo MT), compilada a partir do cÃ³digo aberto do
+Projeto ACBr â€” https://projetoacbr.com.br â€” revisÃ£o 48608 do trunk2
+(https://svn.code.sf.net/p/acbr/code/trunk2).
+
+O ACBr Ã© distribuÃ­do sob a licenÃ§a LGPL (GNU Lesser General Public License). O
+cÃ³digo-fonte desta biblioteca Ã© o do repositÃ³rio acima, na revisÃ£o indicada,
+compilado sem modificaÃ§Ãµes com:
+  lazbuild --build-all --build-mode=win64-x86_64-MT --ws=nogui ACBrLibNFeConsoleMT.lpi
+
+OpenSSL 1.1.1.10 e libxml2: as DLLs distribuÃ­das pelo prÃ³prio Projeto ACBr
+(trunk2/DLLs), cada uma sob a sua licenÃ§a.

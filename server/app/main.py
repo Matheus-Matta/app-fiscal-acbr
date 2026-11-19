@@ -1,10 +1,15 @@
 """A API do comunicador: o cliente chama, a ACBrLib executa, a resposta volta.
 
-Igual no Docker, no serviço Windows e no desktop. Os corpos andam cifrados de ponta
-a ponta (`sigilo.py`). Os dados do emitente chegam na chamada ou ficam guardados
-(`configuracao.py`, gravados pelas rotas `/v1/config/*`). Cada falha vira o `erro`
-que o cliente classifica: é o que decide contingência (`sem_comunicacao`), consulta
-(`incerto`), recusa e configuração.
+Dois modos (`modo.py`, `ACBR_MODO`):
+
+- **nuvem**: token + corpo cifrado de ponta a ponta (`sigilo.py`); o emitente vem em
+  toda chamada e nada é guardado. Só as operações fiscais e a instalação da lib.
+- **local**: só o token, corpo em JSON comum; o emitente fica guardado
+  (`configuracao.py`), gravado pelas rotas `/v1/config/*`, que só atendem a própria
+  máquina.
+
+Cada falha vira o `erro` que o cliente classifica: é o que decide contingência
+(`sem_comunicacao`), consulta (`incerto`), recusa e configuração.
 """
 import json
 import logging
@@ -17,16 +22,38 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
-from app import certificados, configuracao, instalador, modelos, sefaz, sigilo
+from app import certificados, configuracao, instalador, modelos, modo, sefaz, sigilo
 from app.motor import criar_motor
 
 log = logging.getLogger("acbr")
 if not logging.getLogger().handlers:  # o .exe configura o seu (arquivo); o Docker usa este
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
+try:
+    MODO = modo.atual()
+    NUVEM = MODO == modo.NUVEM
+    if NUVEM:
+        modo.conferir_nuvem()
+        #: Na nuvem, quem erra o token demais fica de fora por um tempo.
+        bloqueio = modo.Bloqueio()
+    else:
+        # Valor ruim: melhor não subir do que falhar só na hora de gravar o emitente.
+        modo.redes_de_configuracao()
+        try:
+            modo.chave_do_cofre()
+        except ValueError as erro:
+            raise modo.ConfiguracaoInvalida(f"Modo local: {erro}") from None
+        if configuracao.origem_do_token() == "ausente":
+            raise modo.ConfiguracaoInvalida("Modo local: falta o ACBRLIB_TOKEN (sem ele, toda chamada é recusada).")
+        bloqueio = None
+except modo.ConfiguracaoInvalida as erro:
+    log.error("o comunicador não sobe: %s", erro)
+    raise
+
 # Sem /docs: os corpos são cifrados, e a página só revelaria que o serviço existe.
-app = FastAPI(title="Comunicador ACBrLib", version="1.1", docs_url=None, redoc_url=None, openapi_url=None)
+app = FastAPI(title="Comunicador ACBrLib", version="2.0", docs_url=None, redoc_url=None, openapi_url=None)
 motor = criar_motor()
+log.info("comunicador no modo %s, motor %s", MODO, motor.nome)
 
 ORIGENS = {o.strip().rstrip("/") for o in os.environ.get("ACBR_ALLOWED_ORIGINS", "").split(",") if o.strip()}
 #: Um XML de NF-e grande tem centenas de KB; o teto só barra o abuso.
@@ -64,7 +91,19 @@ _ERROS = {
 }
 
 
-def autenticar(authorization: str = Header(default="")):
+def _ip(request):
+    # Atrás de um proxy, o uvicorn põe aqui o IP do X-Forwarded-For quando o proxy
+    # está em FORWARDED_ALLOW_IPS; senão é o do próprio proxy.
+    return request.client.host if request.client else ""
+
+
+def autenticar(request: Request, authorization: str = Header(default="")):
+    ip = _ip(request)
+    if bloqueio is not None:
+        espera = bloqueio.restante(ip)
+        if espera:
+            raise HTTPException(status_code=429, detail="Muitas tentativas com token errado. Tente mais tarde.",
+                                headers={"Retry-After": str(espera)})
     recebido = authorization.removeprefix("Bearer ").strip()
     try:
         confere = configuracao.token_confere(recebido)
@@ -73,11 +112,26 @@ def autenticar(authorization: str = Header(default="")):
     if confere is None:
         raise HTTPException(status_code=401, detail="ACBRLIB_TOKEN não configurado neste serviço.")
     if not confere:
+        # Um aviso por bloqueio, e não por chute: sob ataque, uma linha por erro
+        # encheria o disco e esconderia o resto do log.
+        if bloqueio is not None and bloqueio.errou(ip):
+            log.warning("%s bloqueado por %s s: errou o token %s vezes", modo.quem_conta(ip),
+                        bloqueio.segundos, bloqueio.tentativas)
         raise HTTPException(status_code=401, detail="token inválido")
+    if bloqueio is not None:
+        bloqueio.acertou(ip)
+
+
+def so_desta_maquina(request: Request):
+    """Modo local: trocar certificado ou token só do próprio computador (ACBR_CONFIG_REDES)."""
+    if not modo.pode_configurar(_ip(request)):
+        log.warning("%s: configuração recusada para %s", request.url.path, _ip(request))
+        raise HTTPException(status_code=403,
+                            detail="A configuração só pode ser alterada no computador do comunicador.")
 
 
 def _selado(request, status, corpo):
-    """A resposta cifrada, ou em claro quando o pedido nem chegou a ser aberto."""
+    """Na nuvem, a resposta cifrada; em claro no modo local ou quando o pedido nem abriu."""
     nonce = getattr(request.state, "nonce", None)
     if nonce is None:
         return JSONResponse(corpo, status_code=status)
@@ -146,7 +200,7 @@ if motor.nome == "ausente" and instalador.precisa_instalar():
 
 @app.get("/health")
 def health():
-    corpo = {"ok": motor.nome != "ausente", "motor": motor.nome, "lib": motor.nome == "acbrlib",
+    corpo = {"ok": motor.nome != "ausente", "modo": MODO, "motor": motor.nome, "lib": motor.nome == "acbrlib",
              "simulador": motor.nome == "simulador"}
     if motor.nome == "ausente":
         # 503 marca o container unhealthy (HEALTHCHECK do Dockerfile) — visível, sem reiniciar.
@@ -154,14 +208,37 @@ def health():
     return corpo
 
 
-def _rota(caminho, modelo, funcao):
-    """Uma rota cifrada: abre o envelope, valida o corpo, executa e sela a resposta."""
+_CAMPOS_DO_ENVELOPE = {"v", "ts", "nonce", "dados"}
+
+
+def _recusar_envelope_no_local(corpo):
+    """Um PDV configurado para a nuvem (ou de versão anterior) mandando envelope cifrado.
+
+    Sem isto, os campos do envelope seriam ignorados e a chamada executaria vazia, com
+    o emitente guardado — um status-servico "dava certo" sem ninguém ter pedido aquilo.
+    """
+    try:
+        dados = json.loads(corpo)
+    except (ValueError, RecursionError):
+        return  # a validação do modelo explica
+    if isinstance(dados, dict) and _CAMPOS_DO_ENVELOPE <= set(dados):
+        raise sigilo.Recusa(400, "cifra_no_modo_local",
+                            "Este comunicador está no modo local: mande o JSON comum, sem a cifra de ponta a "
+                            "ponta, só com o token.")
+
+
+def _rota(caminho, modelo, funcao, *, configuracao_local=False):
+    """Uma rota: abre o corpo (cifrado na nuvem), valida, executa e devolve (selado na nuvem)."""
 
     async def abrir(request: Request):
         bruto = await request.body()
         if len(bruto) > LIMITE_CORPO:
             raise sigilo.Recusa(413, "corpo_grande", "Chamada grande demais.")
-        corpo, request.state.nonce = sigilo.abrir_pedido(bruto, request.method, caminho)
+        if NUVEM:
+            corpo, request.state.nonce = sigilo.abrir_pedido(bruto, request.method, caminho)
+        else:
+            corpo = bruto.strip() or b"{}"
+            _recusar_envelope_no_local(corpo)
         try:
             return modelo.model_validate_json(corpo)
         except ValidationError as erro:
@@ -186,12 +263,32 @@ def _rota(caminho, modelo, funcao):
                  time.monotonic() - inicio)
         return _selado(request, 200, resultado)
 
-    app.post(caminho, dependencies=[Depends(autenticar)])(executar)
+    dependencias = [Depends(autenticar)]
+    if configuracao_local:
+        dependencias.append(Depends(so_desta_maquina))
+    app.post(caminho, dependencies=dependencias)(executar)
+
+
+#: Na nuvem não há emitente guardado para completar a chamada. `ambiente` e `modelo`
+#: têm padrão no contrato ("2", "65"): sem exigi-los, quem esquecesse o ambiente
+#: emitiria em homologação achando que era produção.
+_EMITENTE_NA_CHAMADA = ("cnpj", "uf", "ambiente", "modelo")
+
+
+def _emitente_da_chamada(pedido):
+    """Nuvem: nada guardado — quem emite, onde e com qual A1 vem na chamada."""
+    faltando = [campo for campo in _EMITENTE_NA_CHAMADA
+                if campo not in pedido.model_fields_set or not getattr(pedido, campo)]
+    if faltando:
+        raise sefaz.FalhaDeConfiguracao(
+            f"No modo nuvem a chamada traz o emitente: faltou {', '.join(faltando)} "
+            "(e o certificado e o CSC, se a nota precisar).", "dados_do_emitente_ausentes")
+    return pedido
 
 
 def _fiscal(nome):
     def chamar(pedido):
-        pedido = configuracao.completar(pedido)
+        pedido = _emitente_da_chamada(pedido) if NUVEM else configuracao.completar(pedido)
         conferido = certificados.conferir(pedido, exigir=motor.nome == "acbrlib")
         return getattr(motor, nome)(conferido)
 
@@ -205,13 +302,14 @@ _rota("/v1/nfe/consultar", modelos.Consultar, _fiscal("consultar"))
 _rota("/v1/nfe/cancelar", modelos.Cancelar, _fiscal("cancelar"))
 
 
-# ── configuração (desktop e painel) ──────────────────────────────────────────
+# ── configuração ─────────────────────────────────────────────────────────────
 def _ler_config(_pedido):
     url, sha256 = instalador.pacote_configurado()
     lib = {"pacote_url": url, "sha256": sha256, **_instalacao}
     if motor.nome == "ausente":
         lib["mensagem_motor"] = motor.mensagem
-    return {**configuracao.resumo(), "motor": motor.nome, "lib": lib}
+    guardado = {} if NUVEM else configuracao.resumo()
+    return {**guardado, "modo": MODO, "motor": motor.nome, "lib": lib}
 
 
 def _instalar_pela_api(pedido):
@@ -223,12 +321,18 @@ def _instalar_pela_api(pedido):
     return {**resultado, "motor": motor.nome}
 
 
-_rota("/v1/config/ler", modelos.Vazio, _ler_config)
-_rota("/v1/config/emitente", modelos.Emitente, configuracao.salvar_emitente)
-_rota("/v1/config/lib", modelos.InstalarLib, _instalar_pela_api)
-_rota("/v1/config/emitente/remover", modelos.RemoverEmitente, lambda p: configuracao.remover_emitente(p.cnpj))
-# O novo token só aparece nesta resposta, cifrada. O anterior deixa de valer na hora.
-_rota("/v1/config/token", modelos.TrocarToken, lambda p: {"token": configuracao.trocar_token(p.token)})
+# Nas duas: o estado da lib e a instalação dela. No local, só da própria máquina.
+_rota("/v1/config/ler", modelos.Vazio, _ler_config, configuracao_local=not NUVEM)
+_rota("/v1/config/lib", modelos.InstalarLib, _instalar_pela_api, configuracao_local=not NUVEM)
+
+if not NUVEM:
+    # Só no local: na nuvem, emitente e token não se gravam — as rotas nem existem.
+    _rota("/v1/config/emitente", modelos.Emitente, configuracao.salvar_emitente, configuracao_local=True)
+    _rota("/v1/config/emitente/remover", modelos.RemoverEmitente,
+          lambda p: configuracao.remover_emitente(p.cnpj), configuracao_local=True)
+    # O novo token só aparece nesta resposta. O anterior deixa de valer na hora.
+    _rota("/v1/config/token", modelos.TrocarToken, lambda p: {"token": configuracao.trocar_token(p.token)},
+          configuracao_local=True)
 
 
 if motor.nome == "simulador":

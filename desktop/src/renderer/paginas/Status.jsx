@@ -6,7 +6,6 @@ const SITUACAO = { parado: 'Parado', iniciando: 'Iniciando', rodando: 'Rodando',
 
 /** A ACBrLib: o comunicador a baixa, confere o SHA-256 e instala sozinho (server/app/instalador.py). */
 function Biblioteca({ estado, atualizar, lib }) {
-  const local = estado.modo === 'local';
   const alcancado = Boolean(estado.saude?.alcancado);
   const carregada = Boolean(estado.saude?.lib);
   const [info, setInfo] = useState(null);
@@ -51,9 +50,7 @@ function Biblioteca({ estado, atualizar, lib }) {
   return (
     <Cartao
       titulo="Biblioteca ACBr"
-      acoes={local && (
-        <button type="button" className="botao" onClick={() => api.abrirPasta('lib')}>Abrir pasta</button>
-      )}
+      acoes={<button type="button" className="botao" onClick={() => api.abrirPasta('lib')}>Abrir pasta</button>}
     >
       {carregada ? (
         <Aviso tipo="ok">ACBrLib carregada: o comunicador assina e transmite de verdade.</Aviso>
@@ -63,8 +60,8 @@ function Biblioteca({ estado, atualizar, lib }) {
           {info?.situacao === 'falhou' && <Aviso tipo="erro">A instalação automática falhou: {info.mensagem}</Aviso>}
           <p className="nota">
             A ACBrLib (Projeto ACBr) é baixada, conferida pelo SHA-256 e instalada pelo próprio comunicador. Informe o
-            endereço do pacote (.zip ou .tar.gz, link do MediaFire aceito) e o SHA-256 da lib
-            {local && ', ou escolha um pacote já baixado neste computador'}.
+            endereço do pacote (.zip ou .tar.gz, link do MediaFire aceito) e o SHA-256 da lib, ou escolha um pacote já
+            baixado neste computador.
           </p>
           <div className="grade">
             <Campo rotulo="Endereço do pacote" largo>
@@ -79,19 +76,20 @@ function Biblioteca({ estado, atualizar, lib }) {
               disabled={Boolean(trabalhando) || !alcancado || !url.trim() || !sha.trim()}>
               {trabalhando === 'baixando' ? 'Baixando e conferindo…' : 'Baixar e instalar'}
             </button>
-            {local && (
-              <button type="button" className="botao" onClick={escolher} disabled={Boolean(trabalhando)}>
-                {trabalhando === 'arquivo' ? 'Instalando…' : 'Escolher pacote no computador…'}
-              </button>
-            )}
+            <button type="button" className="botao" onClick={escolher} disabled={Boolean(trabalhando)}>
+              {trabalhando === 'arquivo' ? 'Instalando…' : 'Escolher pacote no computador…'}
+            </button>
           </div>
         </>
       )}
       <Aviso tipo={retorno?.tipo}>{retorno?.texto}</Aviso>
-      {local && (
+      {/* Só quando falta: carregada, ela pode ser a que vem dentro do .exe, e não a desta pasta. */}
+      {!carregada && (
         <>
           <ul className="lista-conferencia">
-            <li className={lib.dll ? 'ok' : 'falta'}>ACBrNFe64.dll e as DLLs que a acompanham</li>
+            <li className={lib.dll ? 'ok' : 'falta'}>
+              {lib.nome}{estado.windows ? ' e as DLLs que a acompanham' : ' (e a libxml2 e a OpenSSL do sistema)'}
+            </li>
             <li className={lib.schemas ? 'ok' : 'falta'}>Pasta Schemas (Schemas/NFe da distribuição da ACBr)</li>
           </ul>
           <p className="nota">Pasta: <code>{estado.pastas.lib}</code></p>
@@ -106,12 +104,11 @@ export default function Status({ estado, atualizar }) {
   const [testando, setTestando] = useState(false);
   const [linhas, setLinhas] = useState([]);
   const [reiniciando, setReiniciando] = useState(false);
-  const local = estado?.modo === 'local';
 
   const lerLog = async () => setLinhas(await api.log());
   useEffect(() => {
-    if (local) lerLog();
-  }, [local, estado?.servidorLocal?.situacao]);
+    lerLog();
+  }, [estado?.servidorLocal?.situacao]);
 
   const testarSefaz = async () => {
     setTestando(true);
@@ -137,28 +134,22 @@ export default function Status({ estado, atualizar }) {
       <Cartao
         titulo="Comunicador"
         acoes={
-          local && (
-            <button type="button" className="botao" onClick={reiniciar} disabled={reiniciando}>
-              {reiniciando ? 'Reiniciando…' : 'Reiniciar'}
-            </button>
-          )
+          <button type="button" className="botao" onClick={reiniciar} disabled={reiniciando}>
+            {reiniciando ? 'Reiniciando…' : 'Reiniciar'}
+          </button>
         }
       >
         <dl className="dados">
           <dt>Modo</dt>
-          <dd>{local ? 'Local, neste computador' : 'Remoto (Docker)'}</dd>
+          <dd>Local, neste computador (o PDV usa só o token)</dd>
           <dt>Endereço</dt>
           <dd><code>{estado.url || '—'}</code></dd>
-          {local && (
-            <>
-              <dt>Processo</dt>
-              <dd>
-                <Indicador tipo={servidorLocal.situacao === 'rodando' ? 'ok' : servidorLocal.situacao === 'erro' ? 'erro' : 'alerta'}>
-                  {SITUACAO[servidorLocal.situacao] || servidorLocal.situacao}
-                </Indicador>
-              </dd>
-            </>
-          )}
+          <dt>Processo</dt>
+          <dd>
+            <Indicador tipo={servidorLocal.situacao === 'rodando' ? 'ok' : servidorLocal.situacao === 'erro' ? 'erro' : 'alerta'}>
+              {SITUACAO[servidorLocal.situacao] || servidorLocal.situacao}
+            </Indicador>
+          </dd>
           <dt>Emissão</dt>
           <dd>
             {saude?.alcancado ? (
@@ -168,8 +159,7 @@ export default function Status({ estado, atualizar }) {
             )}
           </dd>
         </dl>
-        <Aviso tipo="erro">{local && servidorLocal.situacao === 'erro' && servidorLocal.mensagem}</Aviso>
-        <Aviso tipo="erro">{!local && saude && !saude.alcancado && `O comunicador remoto não respondeu: ${saude.mensagem}`}</Aviso>
+        <Aviso tipo="erro">{servidorLocal.situacao === 'erro' && servidorLocal.mensagem}</Aviso>
         <Aviso tipo="alerta">{saude?.alcancado && saude.mensagem}</Aviso>
         <Aviso tipo="alerta">
           {saude?.simulador && 'SEFAZ simulada: nada é emitido de verdade. Desligue em "Acesso e conexão" antes de usar na loja.'}
@@ -200,38 +190,37 @@ export default function Status({ estado, atualizar }) {
         <label className="caixa">
           <input
             type="checkbox"
-            checked={estado.iniciarComWindows}
-            disabled={!estado.podeIniciarComWindows}
+            checked={estado.iniciarComSistema}
+            disabled={!estado.podeIniciarComSistema}
             onChange={async (e) => {
-              await api.iniciarComWindows(e.target.checked);
+              await api.iniciarComSistema(e.target.checked);
               atualizar();
             }}
           />
-          Iniciar com o Windows (direto na bandeja, sem abrir a janela)
+          {estado.windows ? 'Iniciar com o Windows' : 'Iniciar com o sistema'} (direto na bandeja, sem abrir a janela)
         </label>
         <p className="nota">
-          Fechar a janela não encerra o comunicador: ele continua no ícone da bandeja, perto do relógio. Para encerrar,
+          Fechar a janela não encerra o comunicador: ele continua no ícone da bandeja
+          {estado.windows ? ', perto do relógio' : ' (no GNOME, precisa da extensão AppIndicator)'}. Para encerrar,
           clique com o botão direito no ícone e escolha Sair.
         </p>
       </Cartao>
 
-      {local && (
-        <Cartao
-          titulo="Registro do comunicador local"
-          acoes={
-            <>
-              <button type="button" className="botao-texto" onClick={lerLog}>
-                Atualizar
-              </button>
-              <button type="button" className="botao-texto" onClick={() => api.abrirPasta('dados')}>
-                Abrir pasta de dados
-              </button>
-            </>
-          }
-        >
-          <pre className="registro">{linhas.length ? linhas.join('\n') : 'Nada registrado ainda.'}</pre>
-        </Cartao>
-      )}
+      <Cartao
+        titulo="Registro do comunicador"
+        acoes={
+          <>
+            <button type="button" className="botao-texto" onClick={lerLog}>
+              Atualizar
+            </button>
+            <button type="button" className="botao-texto" onClick={() => api.abrirPasta('dados')}>
+              Abrir pasta de dados
+            </button>
+          </>
+        }
+      >
+        <pre className="registro">{linhas.length ? linhas.join('\n') : 'Nada registrado ainda.'}</pre>
+      </Cartao>
     </>
   );
 }

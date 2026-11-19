@@ -1,0 +1,9 @@
+# Binários nunca passam pela conversão de fim de linha.
+*.dll binary
+*.so binary
+*.zip binary
+*.png binary
+*.sh text eol=lf
+# Os Schemas e as licenças vão byte a byte, como vieram.
+*.xsd -text
+**/licencas/** -text

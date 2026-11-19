@@ -5,3 +5,4 @@ libs/
 data/
 .env
 *.pyc
+linux/

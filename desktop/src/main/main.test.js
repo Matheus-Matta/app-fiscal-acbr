@@ -9,7 +9,6 @@ const { test } = require('node:test');
 const { chamar } = require('./cliente');
 const { Preferencias } = require('./preferencias');
 const { ServidorLocal, lerEnv, gravarEnv } = require('./servidor');
-const { abrirResposta, selarPedido } = require('./sigilo');
 
 const CHAVE = Buffer.alloc(32, 'e').toString('base64');
 
@@ -17,73 +16,101 @@ function pastaTemporaria() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'comunicador-'));
 }
 
-// ── a cifra ──────────────────────────────────────────────────────────────────
-test('abre a resposta que o sigilo.py selou (vetor gerado pelo Python)', () => {
-  const envelope = {
-    v: 1,
-    nonce: 'Xz/iZerrlg5Gr1jC',
-    dados: 'JKm5WzedOWz2JWATIxYZIUcNtKja0irIIiGh3lvAAt2vPsQOMLhlJd49wP0p5MCUK9SK2mCSdbvPag==',
-  };
-  const corpo = JSON.parse(abrirResposta(envelope, 200, 'bm9uY2UtcGVkaWRv', CHAVE));
-  assert.deepEqual(corpo, { situacao: 'autorizada', cstat: '100' });
+/** Um comunicador de mentira: anota o pedido e responde `status` com `corpo`. */
+async function comunicadorFalso(status, corpo) {
+  const recebido = {};
+  const servidor = http.createServer((req, res) => {
+    let texto = '';
+    req.on('data', (d) => { texto += d; });
+    req.on('end', () => {
+      Object.assign(recebido, { url: req.url, autorizacao: req.headers.authorization, corpo: texto });
+      res.writeHead(status, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(corpo));
+    });
+  });
+  await new Promise((r) => servidor.listen(0, '127.0.0.1', r));
+  return { servidor, recebido, url: `http://127.0.0.1:${servidor.address().port}` };
+}
+
+// ── o cliente: modo local, JSON comum com o token ────────────────────────────
+test('chama com o token no cabeçalho e o corpo em JSON comum', async () => {
+  const { servidor, recebido, url } = await comunicadorFalso(200, { situacao: 'autorizada' });
+  const r = await chamar({ url, token: 'tok' }, '/v1/nfe/emitir', { ini: 'x' });
+  servidor.close();
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.corpo, { situacao: 'autorizada' });
+  assert.equal(recebido.url, '/v1/nfe/emitir');
+  assert.equal(recebido.autorizacao, 'Bearer tok');
+  assert.deepEqual(JSON.parse(recebido.corpo), { ini: 'x' });
 });
 
-test('resposta com o status trocado não abre', () => {
-  const envelope = {
-    v: 1,
-    nonce: 'Xz/iZerrlg5Gr1jC',
-    dados: 'JKm5WzedOWz2JWATIxYZIUcNtKja0irIIiGh3lvAAt2vPsQOMLhlJd49wP0p5MCUK9SK2mCSdbvPag==',
-  };
-  assert.throws(() => abrirResposta(envelope, 503, 'bm9uY2UtcGVkaWRv', CHAVE));
-});
-
-test('o pedido não leva nada em claro e cada um tem nonce novo', () => {
-  const a = selarPedido('{"senha":"segredo-do-a1"}', 'POST', '/v1/nfe/emitir', CHAVE);
-  const b = selarPedido('{"senha":"segredo-do-a1"}', 'POST', '/v1/nfe/emitir', CHAVE);
-  assert.ok(!JSON.stringify(a.envelope).includes('segredo'));
-  assert.notEqual(a.nonce, b.nonce);
-  assert.equal(Buffer.from(a.nonce, 'base64').length, 12);
-});
-
-test('chave com tamanho errado é recusada antes de chamar', async () => {
-  const r = await chamar({ url: 'http://127.0.0.1:1', token: 't', chave: 'curta' }, '/v1/config/ler');
+test('sem token não chama', async () => {
+  const r = await chamar({ url: 'http://127.0.0.1:1', token: '' }, '/v1/config/ler');
   assert.equal(r.ok, false);
   assert.equal(r.corpo.erro, 'conexao');
 });
 
-test('resposta sem envelope não é tratada como decisão', async () => {
-  const servidor = http.createServer((_req, res) => {
-    res.writeHead(401, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ detail: 'token inválido' }));
-  });
-  await new Promise((r) => servidor.listen(0, '127.0.0.1', r));
-  const { port } = servidor.address();
-  const r = await chamar({ url: `http://127.0.0.1:${port}`, token: 't', chave: CHAVE }, '/v1/config/ler');
+test('recusa volta com a mensagem do comunicador', async () => {
+  const { servidor, url } = await comunicadorFalso(403, { detail: 'A configuração só pode ser alterada no computador do comunicador.' });
+  const r = await chamar({ url, token: 't' }, '/v1/config/emitente');
   servidor.close();
   assert.equal(r.ok, false);
-  assert.equal(r.status, 401);
-  assert.equal(r.corpo.mensagem, 'token inválido');
+  assert.equal(r.status, 403);
+  assert.match(r.corpo.mensagem, /computador do comunicador/);
+});
+
+test('erro fiscal mantém erro e motivo', async () => {
+  const { servidor, url } = await comunicadorFalso(500, { erro: 'configuracao', motivo: 'senha_invalida', mensagem: 'Senha.' });
+  const r = await chamar({ url, token: 't' }, '/v1/status-servico');
+  servidor.close();
+  assert.equal(r.ok, false);
+  assert.equal(r.corpo.erro, 'configuracao');
+  assert.equal(r.corpo.motivo, 'senha_invalida');
+});
+
+test('comunicador fora vira sem_resposta', async () => {
+  const r = await chamar({ url: 'http://127.0.0.1:1', token: 't' }, '/v1/status-servico', {}, { tempoLimiteMs: 2000 });
+  assert.equal(r.ok, false);
+  assert.equal(r.corpo.erro, 'sem_resposta');
 });
 
 // ── o .env ───────────────────────────────────────────────────────────────────
 test('o .env é lido como o servico.py lê, sem cortar o "=" do base64', () => {
   const arquivo = path.join(pastaTemporaria(), '.env');
-  gravarEnv(arquivo, { ACBRLIB_TOKEN: 'abc', ACBR_E2E_KEY: CHAVE });
-  assert.deepEqual(lerEnv(arquivo), { ACBRLIB_TOKEN: 'abc', ACBR_E2E_KEY: CHAVE });
+  gravarEnv(arquivo, { ACBRLIB_TOKEN: 'abc', ACBR_CHAVE_COFRE: CHAVE });
+  assert.deepEqual(lerEnv(arquivo), { ACBRLIB_TOKEN: 'abc', ACBR_CHAVE_COFRE: CHAVE });
 });
 
-test('na primeira vez gera token e chave, e depois os mantém', () => {
+test('.env salvo com BOM (Bloco de Notas) não perde a primeira variável', () => {
+  const arquivo = path.join(pastaTemporaria(), '.env');
+  fs.writeFileSync(arquivo, '﻿ACBRLIB_TOKEN=abc\nACBR_PORT=9000\n', 'utf8');
+  assert.deepEqual(lerEnv(arquivo), { ACBRLIB_TOKEN: 'abc', ACBR_PORT: '9000' });
+});
+
+test('na primeira vez gera token e chave do cofre no modo local, e depois os mantém', () => {
   const servidor = new ServidorLocal({ pastaDados: pastaTemporaria(), comando: 'x' });
   const primeiro = servidor.garantirEnv({ porta: 8123 });
+  assert.equal(primeiro.ACBR_MODO, 'local');
   assert.ok(primeiro.ACBRLIB_TOKEN.length >= 32);
-  assert.equal(Buffer.from(primeiro.ACBR_E2E_KEY, 'base64').length, 32);
+  assert.equal(Buffer.from(primeiro.ACBR_CHAVE_COFRE, 'base64').length, 32);
+  assert.equal(primeiro.ACBR_E2E_KEY, undefined);
   assert.equal(primeiro.ACBR_HOST, '127.0.0.1');
   const segundo = servidor.garantirEnv({ rede: true });
   assert.equal(segundo.ACBRLIB_TOKEN, primeiro.ACBRLIB_TOKEN);
-  assert.equal(segundo.ACBR_E2E_KEY, primeiro.ACBR_E2E_KEY);
+  assert.equal(segundo.ACBR_CHAVE_COFRE, primeiro.ACBR_CHAVE_COFRE);
   assert.equal(segundo.ACBR_PORT, '8123');
   assert.equal(segundo.ACBR_HOST, '0.0.0.0');
-  assert.deepEqual(servidor.conexao(), { url: 'http://127.0.0.1:8123', token: primeiro.ACBRLIB_TOKEN, chave: primeiro.ACBR_E2E_KEY });
+  assert.deepEqual(servidor.conexao(), { url: 'http://127.0.0.1:8123', token: primeiro.ACBRLIB_TOKEN });
+});
+
+test('a chave E2E de uma versão anterior vira a chave do cofre', () => {
+  const pasta = pastaTemporaria();
+  gravarEnv(path.join(pasta, '.env'), { ACBRLIB_TOKEN: 'antigo', ACBR_E2E_KEY: CHAVE, ACBRLIB_PACOTE_URL: 'https://x' });
+  const valores = new ServidorLocal({ pastaDados: pasta, comando: 'x' }).garantirEnv();
+  assert.equal(valores.ACBR_CHAVE_COFRE, CHAVE);
+  assert.equal(valores.ACBRLIB_TOKEN, 'antigo');
+  assert.equal(valores.ACBRLIB_PACOTE_URL, 'https://x');
+  assert.equal(lerEnv(path.join(pasta, '.env')).ACBR_E2E_KEY, undefined);
 });
 
 test('com a porta ocupada não abre e explica', async () => {
@@ -98,18 +125,13 @@ test('com a porta ocupada não abre e explica', async () => {
 });
 
 // ── preferências ─────────────────────────────────────────────────────────────
-test('token e chave do remoto vão cifrados quando o Windows oferece o cofre', () => {
-  const cofre = {
-    isEncryptionAvailable: () => true,
-    encryptString: (s) => Buffer.from(`X${s}`),
-    decryptString: (b) => b.toString().slice(1),
-  };
+test('preferências antigas com modo remoto ficam só com o local, sem segredo', () => {
   const arquivo = path.join(pastaTemporaria(), 'desktop.json');
-  const prefs = new Preferencias(arquivo, cofre);
-  prefs.salvar({ modo: 'remoto', remoto: { url: 'https://f', token: 'tok-secreto', chave: CHAVE } });
-  assert.ok(!fs.readFileSync(arquivo, 'utf8').includes('tok-secreto'));
-  const lido = prefs.ler();
-  assert.equal(lido.modo, 'remoto');
-  assert.equal(lido.remoto.token, 'tok-secreto');
-  assert.equal(lido.local.porta, 8030);
+  fs.writeFileSync(arquivo, JSON.stringify({ modo: 'remoto', remoto: { token: 'tok-secreto' }, local: { porta: 9000 } }));
+  const prefs = new Preferencias(arquivo);
+  assert.deepEqual(prefs.ler(), { local: { porta: 9000, rede: false, origens: '', simulador: false }, avisouBandeja: false });
+  prefs.salvar({ local: { rede: true } });
+  const gravado = fs.readFileSync(arquivo, 'utf8');
+  assert.ok(!gravado.includes('tok-secreto') && !gravado.includes('remoto'));
+  assert.equal(prefs.ler().local.rede, true);
 });

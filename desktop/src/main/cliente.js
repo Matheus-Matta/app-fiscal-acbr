@@ -1,7 +1,5 @@
-// Fala com o comunicador (o local, embutido, ou um Docker remoto) como o PDV fala:
-// token no cabeçalho e corpo cifrado de ponta a ponta.
-const { selarPedido, abrirResposta, envelopeDeResposta } = require('./sigilo');
-
+// Fala com o comunicador local como o PDV fala no modo local: token no cabeçalho e
+// corpo em JSON comum (server/README.md, "Modo local").
 const TEMPO_LIMITE_MS = 60_000;
 
 function base(url) {
@@ -9,45 +7,33 @@ function base(url) {
 }
 
 /**
- * { ok, status, corpo }. `corpo` é o JSON aberto; em falha de rede, `{ erro: 'sem_resposta' }`.
- * Resposta sem envelope (401, 403, erro de sigilo) volta como veio: não traz decisão fiscal.
+ * { ok, status, corpo }. `corpo` é o JSON da resposta; em falha de rede, `{ erro: 'sem_resposta' }`.
+ * 401 e 403 voltam com a `mensagem` do comunicador.
  */
 async function chamar(conexao, caminho, corpo = {}, { tempoLimiteMs = TEMPO_LIMITE_MS } = {}) {
-  if (!conexao.url || !conexao.token || !conexao.chave) {
-    return { ok: false, status: 0, corpo: { erro: 'conexao', mensagem: 'Conexão sem URL, token ou chave.' } };
-  }
-  let selado;
-  try {
-    selado = selarPedido(JSON.stringify(corpo), 'POST', caminho, conexao.chave);
-  } catch (erro) {
-    return { ok: false, status: 0, corpo: { erro: 'conexao', mensagem: erro.message } };
+  if (!conexao.url || !conexao.token) {
+    return { ok: false, status: 0, corpo: { erro: 'conexao', mensagem: 'Conexão sem URL ou token.' } };
   }
   let resposta;
   try {
     resposta = await fetch(base(conexao.url) + caminho, {
       method: 'POST',
       headers: { Authorization: `Bearer ${conexao.token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(selado.envelope),
+      body: JSON.stringify(corpo),
       signal: AbortSignal.timeout(tempoLimiteMs),
     });
   } catch (erro) {
     return { ok: false, status: 0, corpo: { erro: 'sem_resposta', mensagem: `O comunicador não respondeu (${erro.message}).` } };
   }
   const json = await resposta.json().catch(() => null);
-  if (!envelopeDeResposta(json)) {
-    const mensagem = json?.mensagem || json?.detail || `Resposta ${resposta.status} sem cifra.`;
-    return { ok: false, status: resposta.status, corpo: { erro: json?.erro || 'recusado', ...json, mensagem } };
+  if (!json || typeof json !== 'object') {
+    return { ok: false, status: resposta.status, corpo: { erro: 'recusado', mensagem: `Resposta ${resposta.status} inesperada.` } };
   }
-  try {
-    const aberto = JSON.parse(abrirResposta(json, resposta.status, selado.nonce, conexao.chave));
-    return { ok: resposta.ok, status: resposta.status, corpo: aberto };
-  } catch {
-    return {
-      ok: false,
-      status: resposta.status,
-      corpo: { erro: 'sigilo', mensagem: 'A resposta não abriu com a chave: ela não veio deste comunicador.' },
-    };
+  if (!resposta.ok) {
+    const mensagem = json.mensagem || json.detail || `Resposta ${resposta.status}.`;
+    return { ok: false, status: resposta.status, corpo: { erro: json.erro || 'recusado', ...json, mensagem } };
   }
+  return { ok: true, status: resposta.status, corpo: json };
 }
 
 /** O /health, aberto e sem segredo. */

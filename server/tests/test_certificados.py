@@ -179,7 +179,7 @@ def test_repetir_a_chamada_capturada_e_recusado(api):
     assert repetida.status_code == 409 and repetida.json()["motivo"] == "repetida"
 
 
-@pytest.mark.parametrize("deslocamento", [-301, 301])
+@pytest.mark.parametrize("deslocamento", [-310, 310])  # margem: o int() do ts corta até 1 s
 def test_fora_da_janela_e_recusado(api, deslocamento):
     import time
 
@@ -207,7 +207,8 @@ def test_pedido_nao_serve_como_resposta(api):
 
 @pytest.mark.parametrize("lixo", [b"", b"{", b"[]", b'{"v":1}', b'{"v":2,"ts":1,"nonce":"AAAA","dados":"AAAA"}',
                                   b'{"v":1,"ts":"1","nonce":"AAAAAAAAAAAAAAAA","dados":"AAAA"}',
-                                  b'{"v":1,"ts":1,"nonce":7,"dados":"AAAA"}'])
+                                  b'{"v":1,"ts":1,"nonce":7,"dados":"AAAA"}', b"[" * 100_000],
+                         ids=lambda lixo: f"{len(lixo)}-bytes")
 def test_envelope_quebrado_e_recusado_sem_estourar(api, lixo):
     resposta = TestClient.post(api, "/v1/status-servico", content=lixo)
     assert resposta.status_code == 400 and resposta.json()["motivo"] == "envelope_invalido"

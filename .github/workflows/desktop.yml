@@ -1,0 +1,125 @@
+name: Desktop
+
+# Gera o desktop (o comunicador local com a tela de configuração) para:
+#
+# * Windows x64: ComunicadorFiscal-<versão>.exe (portátil), com server/windows/lib;
+# * Linux x64:   ComunicadorFiscal-<versão>-x86_64.AppImage, com server/embutida.
+#
+# A ACBrLib vem do repositório (server/licencas/LEIA-ME.md): nada é baixado dela.
+# Antes de empacotar, o comunicador gerado sobe e o /health tem de dizer `lib: true`.
+#
+# * tag vX.Y.Z: os dois arquivos vão para o Release vX.Y.Z;
+# * botão "Run workflow" ou PR: ficam como artefatos da execução.
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*.*.*"]
+  pull_request:
+    paths: ["desktop/**", "server/**", ".github/workflows/desktop.yml"]
+
+jobs:
+  gerar:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - sistema: windows
+            maquina: windows-latest
+            comunicador: server/windows/saida/AcbrFiscal/AcbrFiscal.exe
+            alvo: --win portable
+            arquivo: desktop/dist/*.exe
+          # 22.04 (glibc 2.35): o que é gerado na glibc mais antiga roda nas mais novas.
+          - sistema: linux
+            maquina: ubuntu-22.04
+            comunicador: server/linux/saida/AcbrFiscal/AcbrFiscal
+            alvo: --linux AppImage
+            arquivo: desktop/dist/*.AppImage
+    runs-on: ${{ matrix.maquina }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: A ACBrLib do repositório é a publicada (SHA-256)
+        run: |
+          for lib in server/embutida/libacbrnfe64.so server/windows/lib/ACBrNFe64.dll; do
+            sha=$(sha256sum "$lib" | cut -d' ' -f1)
+            grep -q "$sha" server/licencas/LEIA-ME.md || { echo "::error::$lib ($sha) não é a de server/licencas/LEIA-ME.md"; exit 1; }
+            echo "$lib $sha"
+          done
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Comunicador (PyInstaller) com a ACBrLib
+        working-directory: desktop
+        env:
+          PYTHON: python
+        run: |
+          npm ci
+          npm run build:servidor
+
+      - name: O comunicador gerado sobe e carrega a ACBrLib
+        env:
+          ACBR_DATA_DIR: ${{ runner.temp }}/comunicador
+          ACBR_PORT: "8031"
+        run: |
+          "${{ matrix.comunicador }}" configurar --token token-do-teste-de-ci-1234 --origens ""
+          "${{ matrix.comunicador }}" > "$RUNNER_TEMP/comunicador.log" 2>&1 &
+          pid=$!
+          encerrar() {
+            if [ "${{ matrix.sistema }}" = windows ]; then taskkill //F //IM AcbrFiscal.exe > /dev/null 2>&1 || true
+            else kill "$pid" 2> /dev/null || true; fi
+          }
+          trap encerrar EXIT
+          for i in $(seq 1 60); do
+            corpo=$(curl -s http://127.0.0.1:8031/health || true)
+            [ -n "$corpo" ] && break
+            sleep 1
+          done
+          echo "health: $corpo"
+          cat "$RUNNER_TEMP/comunicador.log"
+          echo "$corpo" | grep -q '"lib":true' || { echo "::error::O comunicador não carregou a ACBrLib"; exit 1; }
+          echo "$corpo" | grep -q '"modo":"local"' || { echo "::error::O comunicador não subiu no modo local"; exit 1; }
+
+      - name: Desktop (electron-builder)
+        working-directory: desktop
+        run: |
+          # Na tag, o arquivo leva a versão dela (v1.2.3 → ComunicadorFiscal-1.2.3).
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            npm version "${GITHUB_REF_NAME#v}" --no-git-tag-version --allow-same-version
+          fi
+          npm test
+          npm run build:ui
+          npx electron-builder ${{ matrix.alvo }} --x64 --publish never
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.sistema }}
+          path: ${{ matrix.arquivo }}
+          if-no-files-found: error
+
+  publicar:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: gerar
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: arquivos
+          merge-multiple: true
+      - run: ls -la arquivos && (cd arquivos && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt)
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: arquivos/*
+          generate_release_notes: true

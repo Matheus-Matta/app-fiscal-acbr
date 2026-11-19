@@ -20,6 +20,8 @@ jobs:
       - run: pytest tests -q
       - name: A imagem constrói
         run: docker build -t fiscal-acbr:ci .
+      - name: A imagem sobe e carrega a ACBrLib embutida
+        run: bash ../.github/scripts/testar-imagem.sh fiscal-acbr:ci
 
   desktop:
     runs-on: ubuntu-latest

@@ -1,13 +1,19 @@
-"""A configuração guardada (desktop/painel), o token trocado pela API e as regras novas da API."""
+"""Modo local: a configuração guardada (desktop), o token trocado pela API e as regras da API."""
 import base64
 import os
 
 import pytest
-from fastapi.testclient import TestClient
 
-from tests.conftest import CHAVE_E2E, TOKEN
+from tests.conftest import CHAVE_COFRE, TOKEN, cliente_local
 from tests.test_api import INI
 from tests.test_certificados import CNPJ, SENHA, _pfx
+
+
+@pytest.fixture
+def api(api_local):
+    """Todo este arquivo é do modo local: JSON comum, chamado do próprio computador."""
+    return api_local
+
 
 A1 = {"pfx_base64": base64.b64encode(_pfx()).decode(), "senha": SENHA}
 EMITENTE = {"cnpj": "11.222.333/0001-81", "uf": "RJ", "ambiente": "2", "modelo": "65",
@@ -100,13 +106,27 @@ def test_no_disco_nada_fica_em_claro(api, tmp_path):
         assert segredo not in gravado
 
 
-def test_trocar_a_chave_e2e_deixa_a_configuracao_ilegivel(api, monkeypatch):
+def test_trocar_a_chave_do_cofre_deixa_a_configuracao_ilegivel(api, monkeypatch):
     _gravar(api)
-    nova = base64.b64encode(b"n" * 32).decode()
-    monkeypatch.setenv("ACBR_E2E_KEY", nova)
-    api.chave = nova
+    monkeypatch.setenv("ACBR_CHAVE_COFRE", base64.b64encode(b"n" * 32).decode())
     resposta = api.post("/v1/nfe/emitir", json={"ini": INI.format(tp=1)})
     assert resposta.json()["motivo"] == "configuracao_ilegivel"
+
+
+def test_cofre_gravado_com_a_chave_e2e_antiga_continua_abrindo(api, monkeypatch):
+    """Instalações anteriores cifravam o cofre com a ACBR_E2E_KEY: ela vale como chave do cofre."""
+    monkeypatch.delenv("ACBR_CHAVE_COFRE")
+    monkeypatch.setenv("ACBR_E2E_KEY", CHAVE_COFRE)
+    _gravar(api, certificado=None)
+    monkeypatch.delenv("ACBR_E2E_KEY")
+    monkeypatch.setenv("ACBR_CHAVE_COFRE", CHAVE_COFRE)
+    assert api.post("/v1/nfe/emitir", json={"ini": INI.format(tp=1)}).json()["situacao"] == "autorizada"
+
+
+def test_sem_chave_do_cofre_explica(api, monkeypatch):
+    _gravar(api, certificado=None)
+    monkeypatch.delenv("ACBR_CHAVE_COFRE")
+    assert api.post("/v1/config/ler", json={}).json()["motivo"] == "cofre_sem_chave"
 
 
 def test_sem_emitente_nenhum_explica(api):
@@ -130,10 +150,74 @@ def test_remover_emitente(api):
         "emitente_nao_configurado"
 
 
-def test_config_exige_token_e_cifra(api):
-    assert TestClient.post(api, "/v1/config/ler", json={}).status_code == 400  # corpo em claro
+def test_config_exige_token(api):
     api.headers["Authorization"] = "Bearer errado"
     assert api.post("/v1/config/ler", json={}).status_code == 401
+
+
+@pytest.mark.parametrize("rota,corpo", [
+    ("/v1/config/ler", {}), ("/v1/config/emitente", EMITENTE), ("/v1/config/emitente/remover", {"cnpj": CNPJ}),
+    ("/v1/config/token", {}), ("/v1/config/lib", {}),
+])
+def test_pdv_da_rede_emite_mas_nao_reconfigura(api, rota, corpo):
+    _gravar(api, certificado=None)
+    da_rede = cliente_local(("192.168.0.20", 50000))
+    assert da_rede.post(rota, json=corpo).status_code == 403
+    assert da_rede.post("/v1/nfe/emitir", json={"ini": INI.format(tp=1)}).json()["situacao"] == "autorizada"
+
+
+def test_redes_de_configuracao_liberam_o_docker_local(api, monkeypatch):
+    monkeypatch.setenv("ACBR_CONFIG_REDES", "127.0.0.1/32,172.16.0.0/12")
+    assert cliente_local(("172.17.0.1", 50000)).post("/v1/config/ler", json={}).status_code == 200
+    assert cliente_local(("192.168.0.20", 50000)).post("/v1/config/ler", json={}).status_code == 403
+
+
+def test_local_fala_json_comum_sem_cifra(api):
+    _gravar(api, certificado=None)
+    resposta = api.post("/v1/nfe/emitir", json={"ini": INI.format(tp=1)})
+    assert resposta.json()["situacao"] == "autorizada" and "dados" not in resposta.json()
+
+
+@pytest.mark.parametrize("lixo", [b"{nao e json", b"[" * 100_000, b"[]", b"7"],
+                         ids=["quebrado", "aninhado-demais", "lista", "numero"])
+def test_json_quebrado_e_campos_invalidos(api, lixo):
+    resposta = api.post("/v1/nfe/emitir", content=lixo)
+    assert resposta.status_code == 422 and resposta.json()["motivo"] == "campos_invalidos"
+
+
+@pytest.mark.parametrize("rota", ["/v1/status-servico", "/v1/config/ler"])
+def test_chamada_cifrada_no_local_e_recusada_e_nao_executa(api, motor_real, rota):
+    """Um PDV ainda configurado com a cifra: sem isto, o envelope viraria uma chamada vazia."""
+    from app import sigilo
+    from tests.conftest import CHAVE_E2E, _texto
+
+    _gravar(api)
+    envelope, _ = sigilo.selar_pedido(_texto({}), "POST", rota, CHAVE_E2E)
+    resposta = api.post(rota, json=envelope)
+    assert resposta.status_code == 400 and resposta.json()["motivo"] == "cifra_no_modo_local"
+    assert motor_real.pedido is None
+
+
+@pytest.mark.parametrize("variavel,valor", [("ACBR_CONFIG_REDES", "127.0.0.1,rede-que-nao-existe"),
+                                            ("ACBR_CHAVE_COFRE", ""), ("ACBR_CHAVE_COFRE", "curta"),
+                                            ("ACBRLIB_TOKEN", "")])
+def test_local_mal_configurado_nao_sobe(ambiente_local, monkeypatch, variavel, valor):
+    import importlib
+
+    import app.main
+    from app import modo
+
+    monkeypatch.setenv(variavel, valor)
+    with pytest.raises(modo.ConfiguracaoInvalida):
+        importlib.reload(app.main)
+
+
+def test_local_nao_bloqueia_por_tentativas(api):
+    api.headers["Authorization"] = "Bearer errado"
+    for _ in range(15):
+        assert api.post("/v1/config/ler", json={}).status_code == 401
+    api.headers["Authorization"] = f"Bearer {TOKEN}"
+    assert api.post("/v1/config/ler", json={}).status_code == 200
 
 
 # ── o token ───────────────────────────────────────────────────────────────────
@@ -157,7 +241,7 @@ def test_apagar_o_acesso_volta_ao_token_do_env(api, tmp_path):
     assert api.post("/v1/config/ler", json={}).json()["token"] == "ambiente"
 
 
-@pytest.mark.parametrize("token", ["curto", "com espaco no meio do token", "token#com#cerquilha#1", CHAVE_E2E])
+@pytest.mark.parametrize("token", ["curto", "com espaco no meio do token", "token#com#cerquilha#1", CHAVE_COFRE])
 def test_token_ruim_e_recusado(api, token):
     resposta = api.post("/v1/config/token", json={"token": token})
     assert resposta.status_code == 422
@@ -184,7 +268,7 @@ def test_ini_malformado_no_simulador_e_documento_invalido(api):
 
 
 def test_corpo_grande_demais_e_recusado(api):
-    resposta = TestClient.post(api, "/v1/nfe/emitir", content=b"x" * (8 * 1024 * 1024 + 1))
+    resposta = api.post("/v1/nfe/emitir", content=b"x" * (8 * 1024 * 1024 + 1))
     assert resposta.status_code == 413
 
 
@@ -212,5 +296,6 @@ def test_preflight_de_rede_privada_e_liberado_para_a_origem_permitida(api):
 
 def test_health_continua_aberto_e_sem_segredo(api):
     _gravar(api)
-    assert set(api.get("/health").json()) == {"ok", "motor", "lib", "simulador"}
+    assert api.get("/health").json() == {"ok": True, "modo": "local", "motor": "simulador", "lib": False,
+                                         "simulador": True}
 

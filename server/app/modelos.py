@@ -1,8 +1,8 @@
 """O contrato com o cliente (server/README.md, "Operações").
 
-Quem emite, onde e com qual certificado pode chegar em toda chamada ou ficar
-guardado no comunicador (`configuracao.py`, o que o desktop grava). O que vier
-na chamada vale sobre o guardado.
+Quem emite, onde e com qual certificado chega em toda chamada no modo nuvem, e
+fica guardado no comunicador no modo local (`configuracao.py`, o que o desktop
+grava). No local, o que vier na chamada vale sobre o guardado (`modo.py`).
 """
 import re
 from typing import Literal

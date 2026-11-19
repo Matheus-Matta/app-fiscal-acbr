@@ -10,8 +10,39 @@ cliente (PDV / ERP) ──► Comunicador Fiscal ──► ACBrLib ──► SEF
          └──── resposta ───────┘
 ```
 
-A API, a cifra de ponta a ponta e a configuração guardada estão em
-[`server/README.md`](../server/README.md). Aqui fica o que o cliente precisa decidir.
+Cada rota, campo, resposta e erro está na [referência da API](API.md); instalar e operar, no
+[guia de uso](USO.md). Aqui fica o que o cliente precisa decidir.
+
+## Qual comunicador o cliente chama
+
+| | Comunicador na **nuvem** (Docker, `ACBR_MODO=nuvem`) | Comunicador **local** (desktop, serviço Windows) |
+|---|---|---|
+| O cliente guarda | o token, a `ACBR_E2E_KEY`, e o certificado A1 + senha + CSC de cada emitente | só o token |
+| Cada chamada leva | `Authorization: Bearer`, corpo cifrado, o contexto inteiro (`cnpj`, `uf`, `ambiente`, `modelo`, `certificado`, `csc`) e o documento | `Authorization: Bearer` e o documento, em JSON comum |
+| O emitente é configurado | pelo cliente, que o manda em toda chamada | na tela **Emitente** do desktop, nesta máquina |
+| Endereço | `https://` atrás de um proxy | `http://127.0.0.1:8030` (ou o IP do PC, na rede da loja) |
+
+**Nuvem, exemplo** (o JSON abaixo é o texto claro que vai cifrado no envelope):
+
+```json
+POST /v1/nfe/emitir
+{"cnpj": "11222333000181", "uf": "SP", "ambiente": "1", "modelo": "65", "fuso": "-03:00",
+ "certificado": {"pfx_base64": "MIIK…", "senha": "…"}, "csc": {"id": "1", "token": "…"},
+ "ini": "[Identificacao]…"}
+```
+
+O cliente guarda o certificado e o CSC como guarda qualquer segredo (cofre, variável
+cifrada) e só os manda para o comunicador dentro do envelope. A resposta traz o XML
+assinado/autorizado: o comunicador não fica com cópia (nem na nuvem nem no local), então **guardar o XML é
+obrigação do cliente**.
+
+**Local, exemplo:**
+
+```bash
+curl -X POST http://127.0.0.1:8030/v1/nfe/emitir \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"ini": "[Identificacao]…"}'
+```
 
 ## Quem guarda o quê
 
@@ -19,9 +50,9 @@ O comunicador **não tem fila nem banco de notas**. A nota pendente, o XML assin
 contingência e o número da série moram no cliente. Se o comunicador reiniciar no meio,
 nada se perde: o cliente tem tudo para consultar ou transmitir de novo.
 
-O comunicador guarda só a configuração do emitente (certificado, CSC, UF, ambiente),
-quando ela é gravada pelo desktop ou por `/v1/config/emitente`. Um cliente que prefira
-mandar tudo em cada chamada pode — o que vem na chamada vale sobre o guardado.
+Na nuvem, o comunicador não guarda nada do emitente nem das notas. No local, guarda a
+configuração do emitente (certificado, CSC, UF, ambiente), gravada pelo desktop, e
+nenhum XML; o que vier na chamada ainda vale sobre o guardado.
 
 ## O resultado
 
@@ -47,7 +78,7 @@ da nota é o `cstat`, já traduzido em `situacao`.
 | `erro: incerto` (500) | a nota **pode ter saído** | **consulta antes de qualquer reenvio** |
 | `erro: documento_invalido` (422) | schema, assinatura, INI ou campo fora do contrato | corrige o documento; repetir dá o mesmo erro |
 | `erro: configuracao` (500) | certificado, CSC, lib ou emitente | nada sai até corrigir; **nunca** vira contingência |
-| sem resposta, 401, 403 ou `erro: sigilo` | não se sabe o que houve | trata como `incerto`: depois de um envio, consulta |
+| sem resposta, 401, 403, 429 ou `erro: sigilo` | não se sabe o que houve | trata como `incerto`: depois de um envio, consulta |
 | `situacao: nao_encontrada` (na consulta) | a SEFAZ não tem a nota | pode transmitir de novo |
 
 O `motivo` de cada erro diz a providência para o operador (`senha_invalida`,
@@ -98,36 +129,42 @@ retransmite sozinho — o cliente agenda a transmissão das pendentes.
 
 ## A ACBrLib
 
-A biblioteca é do Projeto ACBr, tem licença própria e não é versionada aqui. **O
-comunicador a instala sozinho** ([`server/app/instalador.py`](../server/app/instalador.py)):
+A biblioteca é do Projeto ACBr (LGPL 2.1) e **vem neste repositório**, compilada do código
+público na revisão r48608 do SVN, sem modificações. Nada é baixado para emitir:
 
-1. Sem lib, ele baixa o pacote de `ACBRLIB_PACOTE_URL` (`.tar.gz` ou `.zip`; link do
-   MediaFire aceito — o direto é lido da página).
-2. Confere a lib pelo **SHA-256** (`ACBRLIB_SO_SHA256`) e pelo cabeçalho (ELF no Linux, MZ
-   no Windows). Uma página de erro, um download pela metade ou uma lib trocada viram
-   aviso — nunca uma lib carregada.
-3. Põe a lib, as que a acompanham e os `.xsd` de `Schemas/NFe` em `<dados>/lib`, inteira ou
-   nada, e passa a emitir **sem reiniciar**. Já instalada e conferida, não baixa de novo;
-   trocar o `ACBRLIB_SO_SHA256` (e o pacote) reinstala.
-4. Nunca derruba o comunicador: falhou, o `/health` diz por quê.
+| | Onde está | Vai para |
+|---|---|---|
+| Linux x64 | [`server/embutida/`](../server/embutida/LEIAME.md): `libacbrnfe64.so` + `Schemas` | a imagem Docker (`/opt/acbr`) |
+| Windows x64 | `server/windows/lib/`: `ACBrNFe64.dll` + OpenSSL + libxml2 + `Schemas` | o `.exe` do serviço e o desktop |
 
-Sem a variável, vale o **pacote de referência**: ACBrLibNFe 1.5.0.488, Linux x64 (MT),
-SHA-256 `deec61a921b830516ad3d7f5833aee7cb69603391eb497e649296ecc5522b3f0`. **Para Windows
-não há pacote de referência**: monte um `.zip` com `ACBrNFe64.dll`, as DLLs que a
-acompanham e `Schemas/NFe`, hospede-o e informe URL e SHA-256 (no desktop, na tela Status).
-`ACBRLIB_PACOTE_URL=` (vazia) desliga a instalação automática.
+Licenças, origem do código e SHA-256 de cada binário:
+[`server/licencas/LEIA-ME.md`](../server/licencas/LEIA-ME.md). A DLL do Windows se refaz com
+[`server/windows/compilar-acbrlib.ps1 -Revisao 48608`](../server/windows/compilar-acbrlib.ps1),
+e um teste confere que os binários do repositório têm o SHA-256 publicado.
 
 Onde a lib pode estar, na ordem em que vale:
 
 | | Docker | Desktop / serviço Windows |
 |---|---|---|
-| montada / ao lado do programa | `./libs` → `/app/libs` | `windows\lib` no build (vai junto no `.exe`) |
-| embutida na imagem | `embutida/`, `--build-arg ACBRLIB_PACOTE_URL`, ou a Action `imagem.yml` | — |
+| montada | `./libs` → `/app/libs` | — |
+| embutida (a do repositório) | `/opt/acbr` | instalada pelo comunicador, se houver (`<dados>\lib`); senão a que vai junto no `.exe` |
 | instalada pelo comunicador | `/app/data/lib` (volume) | `%APPDATA%\Comunicador Fiscal\servidor\lib` / `%PROGRAMDATA%\AcbrFiscal\lib` |
 
-Também à mão: `python -m app.instalador --url URL --sha256 HASH` (ou `--arquivo pacote.zip`),
-`AcbrFiscal.exe instalar-lib ...`, a rota `POST /v1/config/lib {url, sha256}` ou os botões
-da tela Status do desktop. Os Schemas valem os que estão ao lado da lib escolhida.
+**Trocar de versão:**
+
+- **Docker**: ponha a nova lib e os `Schemas` em `server/embutida/` e refaça a imagem, ou
+  monte-os em `./libs` (vale antes da embutida, sem refazer nada).
+- **Desktop / serviço**: rode `compilar-acbrlib.ps1` com outra `-Revisao` e gere o `.exe` de
+  novo, ou instale um pacote pela tela Status ou por `AcbrFiscal.exe instalar-lib` — a lib
+  instalada na pasta de dados vale antes da que vem no `.exe`.
+
+O instalador ([`server/app/instalador.py`](../server/app/instalador.py)) continua para quem
+quiser um pacote próprio: `ACBRLIB_PACOTE_URL` + `ACBRLIB_SO_SHA256`,
+`POST /v1/config/lib {url, sha256}` ou `python -m app.instalador --url URL --sha256 HASH`
+(ou `--arquivo pacote.zip`). Confere a lib pelo SHA-256 e pelo cabeçalho (ELF/MZ) antes de
+pô-la no lugar, inteira ou nada. Ele só age quando **não há lib nenhuma carregada** (com a
+embutida, a rota responde `lib_ja_carregada`). Sem `ACBRLIB_PACOTE_URL`, nada é baixado.
+Os Schemas valem os que estão ao lado da lib escolhida.
 
 Detalhes que já custaram nota recusada:
 
@@ -167,7 +204,7 @@ O INI segue o leiaute da ACBrLib NFe. Algumas recusas comuns:
 
 ## Homologação e produção
 
-O ambiente vai no emitente (ou na chamada): `"2"` homologação, `"1"` produção. Ao passar
+O ambiente vai na chamada (nuvem) ou no emitente guardado (local): `"2"` homologação, `"1"` produção. Ao passar
 para produção, troque também o **CSC** pelo de produção e confira o **próximo número** da
 série: notas de teste não ocupam números de produção, mas um buraco na série exige
 inutilização na SEFAZ.
@@ -182,7 +219,7 @@ fiscal"**, e produção é recusada. `POST /_simulador/modo` com `{"modo": "onli
 ## Roteiro de homologação
 
 1. Comunicador com a lib: `GET /health` com `lib: true`.
-2. Emitente gravado com o A1 e o CSC de homologação; `POST /v1/status-servico`: `online: true`.
+2. A1 e CSC de homologação (na chamada, na nuvem; gravados no desktop, no local); `POST /v1/status-servico`: `online: true`.
 3. Venda → NFC-e autorizada (cStat 100), DANFE com protocolo.
 4. Sem internet → `sem_comunicacao` → contingência → DANFE de contingência.
 5. Reiniciar o comunicador com a nota pendente → nada se perde (está no cliente).

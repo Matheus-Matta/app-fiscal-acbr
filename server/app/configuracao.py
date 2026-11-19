@@ -1,15 +1,16 @@
-"""A configuração guardada: os emitentes (certificado, CSC, UF...) e o token de acesso.
+"""A configuração guardada do modo local: os emitentes (certificado, CSC, UF...) e o token.
 
-Fica na pasta de dados (`ACBR_DATA_DIR`: `/app/data` no Docker, a do usuário no
-desktop, `%PROGRAMDATA%\\AcbrFiscal` no serviço Windows) e é gravada pelas rotas
-`/v1/config/*`, que o desktop usa, com a mesma cifra de ponta a ponta das notas.
+Só no modo local (`modo.py`): na nuvem nada disto é gravado, e o emitente vem em
+toda chamada. Fica na pasta de dados (`ACBR_DATA_DIR`: `/app/data` no Docker, a do
+usuário no desktop, `%PROGRAMDATA%\\AcbrFiscal` no serviço Windows) e é gravada pelas
+rotas `/v1/config/*`, que o desktop usa e que só atendem a própria máquina.
 
 - `configuracao.bin`: os emitentes, cifrados com AES-256-GCM e uma chave derivada
-  da `ACBR_E2E_KEY`. Trocar a chave deixa o arquivo ilegível: cadastre de novo.
+  da `ACBR_CHAVE_COFRE`. Trocar a chave deixa o arquivo ilegível: cadastre de novo.
 - `acesso.json`: o SHA-256 do token trocado pela API. Ele vale no lugar do
   `ACBRLIB_TOKEN` do .env; apagar o arquivo devolve o acesso ao token do .env.
 
-A chamada continua podendo trazer tudo: o que vier nela vale sobre o guardado.
+A chamada ainda pode trazer os dados: o que vier nela vale sobre o guardado.
 """
 import hashlib
 import json
@@ -22,7 +23,7 @@ from pathlib import Path
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-from app import certificados, modelos, sefaz, sigilo
+from app import certificados, modelos, modo, sefaz, sigilo
 
 log = logging.getLogger("acbr.configuracao")
 
@@ -55,7 +56,12 @@ def _gravar(arquivo, dados):
 
 # ── o cofre dos emitentes ────────────────────────────────────────────────────
 def _chave():
-    return sigilo._derivar(sigilo._chave_do_ambiente(), "cofre")
+    try:
+        bruta = modo.chave_do_cofre()
+    except ValueError as erro:
+        raise sefaz.FalhaDeConfiguracao(str(erro), "cofre_sem_chave") from None
+    # A mesma derivação de antes: o cofre gravado com a ACBR_E2E_KEY continua abrindo.
+    return sigilo._derivar(bruta, "cofre")
 
 
 def _ler():
@@ -70,7 +76,7 @@ def _ler():
         dados = json.loads(AESGCM(_chave()).decrypt(nonce, cifrado, _AAD))
     except (InvalidTag, ValueError):
         raise sefaz.FalhaDeConfiguracao(
-            f"A configuração guardada em {arquivo} não abre com a ACBR_E2E_KEY atual "
+            f"A configuração guardada em {arquivo} não abre com a ACBR_CHAVE_COFRE atual "
             "(a chave foi trocada?). Cadastre os emitentes de novo.", "configuracao_ilegivel") from None
     dados.setdefault("emitentes", {})
     return dados
@@ -166,6 +172,8 @@ def _hash(token):
 
 
 def _hash_guardado():
+    if modo.atual() == modo.NUVEM:
+        return None  # na nuvem vale só o token do .env
     try:
         return json.loads(_arquivo_acesso().read_text(encoding="utf-8"))["sha256"]
     except FileNotFoundError:
@@ -199,8 +207,8 @@ def trocar_token(novo=""):
         raise sefaz.DocumentoInvalido("O token precisa de ao menos 16 caracteres.", "token_curto")
     if any(c.isspace() or c == "#" for c in novo) or not novo.isascii():
         raise sefaz.DocumentoInvalido("O token não pode ter espaço, '#' nem acento.", "token_invalido")
-    if novo == os.environ.get("ACBR_E2E_KEY", ""):
-        raise sefaz.DocumentoInvalido("O token não pode ser igual à ACBR_E2E_KEY.", "token_invalido")
+    if novo in (os.environ.get("ACBR_CHAVE_COFRE", ""), os.environ.get("ACBR_E2E_KEY", "")):
+        raise sefaz.DocumentoInvalido("O token não pode ser igual à chave do cofre.", "token_invalido")
     with _trava:
         _gravar(_arquivo_acesso(), json.dumps({"sha256": _hash(novo)}).encode())
     log.info("token de acesso trocado pela API")

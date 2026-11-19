@@ -94,7 +94,7 @@ def abrir_pedido(envelope, metodo, caminho):
         nonce_bruto = _decodificar(nonce)
         cifrado = _decodificar(dados["dados"])
         valido = dados["v"] == VERSAO and type(ts) is int and len(nonce_bruto) == 12
-    except (ValueError, KeyError, TypeError, binascii.Error):
+    except (ValueError, KeyError, TypeError, RecursionError, binascii.Error):
         valido = False
     if not valido:
         raise Recusa(400, "envelope_invalido", "Chamada sem a cifra de ponta a ponta.")

@@ -2,8 +2,10 @@
 __pycache__/
 libs/
 data/
-embutida/*.so*
-windows/lib/
+# As libs da ACBr VÃO no repositório (embutida/ e windows/lib/, licenças em licencas/).
+# O .zip é só a mesma windows/lib compactada, para hospedar: não precisa ir.
+windows/pacote/
 windows/saida/
 windows/.venv/
-embutida/Schemas/
+linux/saida/
+linux/.venv/

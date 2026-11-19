@@ -1,17 +1,19 @@
 {
   "name": "comunicador-fiscal-desktop",
   "version": "1.1.0",
-  "description": "Comunicador Fiscal ACBr para o PC da loja: emite e faz contingência local, sem depender de internet",
+  "description": "Comunicador Fiscal ACBr para o PC da loja (Windows e Linux): emite e faz contingência local, sem depender de internet",
   "private": true,
   "main": "src/main/main.js",
   "scripts": {
     "dev": "concurrently -k -n ui,app \"vite\" \"wait-on tcp:5173 && cross-env ACBR_DEV_URL=http://localhost:5173 node scripts/abrir-electron.js\"",
     "start": "npm run build:ui && node scripts/abrir-electron.js",
     "build:ui": "vite build",
-    "build:servidor": "powershell -NoProfile -ExecutionPolicy Bypass -File ../server/windows/gerar.ps1 -SoExe",
-    "build": "npm run build:ui && electron-builder --win portable --x64",
+    "build:servidor": "node scripts/gerar-servidor.js",
+    "build": "npm run build:ui && electron-builder --x64",
     "build:tudo": "npm run build:servidor && npm run build",
-    "test": "node --test \"src/main/**/*.test.js\""
+    "test": "node --test \"src/main/**/*.test.js\"",
+    "build:win": "npm run build:ui && electron-builder --win portable --x64",
+    "build:linux": "npm run build:ui && electron-builder --linux AppImage --x64"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^6.3.0",
@@ -39,10 +41,6 @@
     ],
     "extraResources": [
       {
-        "from": "../server/windows/saida/AcbrFiscal",
-        "to": "servidor"
-      },
-      {
         "from": "resources/icone.png",
         "to": "icone.png"
       }
@@ -56,10 +54,39 @@
             "x64"
           ]
         }
+      ],
+      "extraResources": [
+        {
+          "from": "../server/windows/saida/AcbrFiscal",
+          "to": "servidor"
+        }
       ]
     },
     "portable": {
       "artifactName": "ComunicadorFiscal-${version}.exe"
+    },
+    "linux": {
+      "icon": "resources/icone.png",
+      "category": "Office",
+      "synopsis": "Emissor de NFC-e/NF-e pela ACBrLib",
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "extraResources": [
+        {
+          "from": "../server/linux/saida/AcbrFiscal",
+          "to": "servidor"
+        }
+      ]
+    },
+    "appImage": {
+      "artifactName": "ComunicadorFiscal-${version}-x86_64.AppImage"
     }
-  }
+  },
+  "author": "Comunicador Fiscal"
 }

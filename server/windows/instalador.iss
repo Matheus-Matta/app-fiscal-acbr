@@ -27,8 +27,8 @@ Source: "saida\AcbrFiscal\*"; DestDir: "{app}"; Flags: recursesubdirs ignorevers
 Source: "lib\*"; DestDir: "{app}\lib"; Flags: recursesubdirs ignoreversion skipifsourcedoesntexist
 
 [Run]
-; O console fica aberto para digitar ou anotar o token e a chave do PDV.
-Filename: "{cmd}"; Parameters: "/c ""{app}\AcbrFiscal.exe"" configurar & pause"; StatusMsg: "Definindo o token e a chave..."; Flags: waituntilterminated; Check: not WizardSilent
+; O console fica aberto para digitar ou anotar o token do PDV.
+Filename: "{cmd}"; Parameters: "/c ""{app}\AcbrFiscal.exe"" configurar & pause"; StatusMsg: "Definindo o token..."; Flags: waituntilterminated; Check: not WizardSilent
 #ifndef TESTE
 Filename: "{app}\AcbrFiscal.exe"; Parameters: "instalar-tarefa"; StatusMsg: "Registrando o início com o Windows..."; Flags: runhidden waituntilterminated
 #endif

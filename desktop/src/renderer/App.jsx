@@ -13,10 +13,10 @@ const PAGINAS = [
 /** ok | alerta | erro, e a frase curta do estado geral. */
 export function resumoDoEstado(estado) {
   if (!estado) return ['alerta', 'Carregando…'];
-  const { saude, servidorLocal, modo } = estado;
-  if (modo === 'local' && servidorLocal?.situacao === 'erro') return ['erro', 'Comunicador local com erro'];
-  if (modo === 'local' && servidorLocal?.situacao === 'iniciando') return ['alerta', 'Iniciando…'];
-  if (!saude?.alcancado) return ['erro', modo === 'remoto' ? 'Remoto fora de alcance' : 'Comunicador parado'];
+  const { saude, servidorLocal } = estado;
+  if (servidorLocal?.situacao === 'erro') return ['erro', 'Comunicador com erro'];
+  if (servidorLocal?.situacao === 'iniciando') return ['alerta', 'Iniciando…'];
+  if (!saude?.alcancado) return ['erro', 'Comunicador parado'];
   if (saude.simulador) return ['alerta', 'Simulador (sem valor fiscal)'];
   if (!saude.ok) return ['alerta', 'Falta a ACBrLib'];
   return ['ok', 'Pronto para emitir'];

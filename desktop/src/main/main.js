@@ -1,12 +1,15 @@
-// Comunicador Fiscal — desktop. Um .exe só (portátil, sem instalador): abre a janela de
-// configuração e sobe o comunicador local (AcbrFiscal.exe) por baixo. Fechar a janela
-// não encerra: ele fica na bandeja, emitindo para o PDV. "Sair" está no menu da bandeja.
+// Comunicador Fiscal — desktop. Um arquivo só, sem instalador (Windows: .exe portátil;
+// Linux: AppImage): abre a janela de configuração e sobe o comunicador local
+// (AcbrFiscal[.exe]) por baixo. Fechar a janela não encerra: ele fica na bandeja,
+// emitindo para o PDV. "Sair" está no menu da bandeja.
+// O comunicador roda no modo local (server/app/modo.py): o PDV usa só o token, e o
+// emitente fica guardado nele. O Docker na nuvem não se configura por aqui.
 const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const {
-  app, BrowserWindow, Menu, Tray, clipboard, dialog, ipcMain, nativeImage, safeStorage, shell,
+  app, BrowserWindow, Menu, Tray, clipboard, dialog, ipcMain, nativeImage, shell,
 } = require('electron');
 const { chamar, saude } = require('./cliente');
 const { Preferencias } = require('./preferencias');
@@ -17,8 +20,15 @@ app.setName('Comunicador Fiscal'); // antes de qualquer getPath: a pasta do usu�
 const EMPACOTADO = app.isPackaged;
 const URL_DEV = process.env.ACBR_DEV_URL || '';
 const RAIZ = path.join(__dirname, '..', '..');
-const OCULTO = process.argv.includes('--oculto'); // aberto com o Windows: direto para a bandeja
+const OCULTO = process.argv.includes('--oculto'); // aberto com o sistema: direto para a bandeja
 const TAMANHO_MAXIMO_PFX = 256 * 1024;
+const WINDOWS = process.platform === 'win32';
+const LINUX = process.platform === 'linux';
+const COMUNICADOR = WINDOWS ? 'AcbrFiscal.exe' : 'AcbrFiscal';
+const NOME_LIB = WINDOWS ? 'ACBrNFe64.dll' : 'libacbrnfe64.so';
+// Linux: o "iniciar com o sistema" é um atalho em ~/.config/autostart (padrão XDG).
+const AUTOSTART = path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'autostart',
+  'comunicador-fiscal.desktop');
 
 let janela = null;
 let bandeja = null;
@@ -32,17 +42,18 @@ function recurso(nome) {
 }
 
 function acharPython() {
+  const nome = WINDOWS ? 'python' : 'python3';
   try {
-    return execFileSync('where', ['python'], { encoding: 'utf8' }).split(/\r?\n/)[0].trim();
+    return execFileSync(WINDOWS ? 'where' : 'which', [nome], { encoding: 'utf8' }).split(/\r?\n/)[0].trim();
   } catch {
-    return 'python';
+    return nome;
   }
 }
 
 function criarServidor() {
   const pastaDados = path.join(app.getPath('userData'), 'servidor');
   if (EMPACOTADO) {
-    return new ServidorLocal({ pastaDados, comando: path.join(process.resourcesPath, 'servidor', 'AcbrFiscal.exe') });
+    return new ServidorLocal({ pastaDados, comando: path.join(process.resourcesPath, 'servidor', COMUNICADOR) });
   }
   // Desenvolvimento: o servico.py direto do repositório.
   const pastaServer = path.join(RAIZ, '..', 'server');
@@ -55,8 +66,7 @@ function criarServidor() {
 }
 
 function conexaoAtiva() {
-  const p = prefs.ler();
-  return p.modo === 'remoto' ? p.remoto : servidor.conexao();
+  return servidor.conexao();
 }
 
 // ── janela e bandeja ─────────────────────────────────────────────────────────
@@ -115,8 +125,7 @@ function avisarQueFicouNaBandeja() {
 const DESCRICAO = { parado: 'parado', iniciando: 'iniciando…', rodando: 'ativo', erro: 'com erro' };
 
 function descricaoDoEstado() {
-  if (prefs.ler().modo === 'remoto') return 'usando comunicador remoto';
-  return `comunicador local ${DESCRICAO[servidor.estado.situacao] || servidor.estado.situacao}`;
+  return `comunicador ${DESCRICAO[servidor.estado.situacao] || servidor.estado.situacao}`;
 }
 
 function atualizarBandeja() {
@@ -128,16 +137,16 @@ function atualizarBandeja() {
       { label: descricaoDoEstado(), enabled: false },
       { type: 'separator' },
       {
-        label: 'Iniciar com o Windows',
+        label: WINDOWS ? 'Iniciar com o Windows' : 'Iniciar com o sistema',
         type: 'checkbox',
-        enabled: EMPACOTADO,
-        checked: iniciaComWindows(),
+        enabled: PODE_INICIAR_COM_SISTEMA,
+        checked: iniciaComSistema(),
         click: (item) => {
-          definirInicioComWindows(item.checked);
+          definirInicioComSistema(item.checked);
           atualizarBandeja();
         },
       },
-      { label: 'Reiniciar comunicador local', enabled: prefs.ler().modo === 'local', click: () => servidor.reiniciar(prefs.ler().local) },
+      { label: 'Reiniciar comunicador', click: () => servidor.reiniciar(prefs.ler().local) },
       { label: 'Abrir pasta de dados', click: () => shell.openPath(servidor.pastaDados) },
       { type: 'separator' },
       { label: 'Sair', click: () => app.quit() },
@@ -152,18 +161,54 @@ function criarBandeja() {
   atualizarBandeja();
 }
 
-// ── iniciar com o Windows ────────────────────────────────────────────────────
+// ── iniciar com o sistema ────────────────────────────────────────────────────
+// Windows: o item de login do Electron. Linux: um .desktop em ~/.config/autostart, que o
+// GNOME, o KDE, o XFCE e o Cinnamon abrem ao entrar (o Electron não faz isso no Linux).
+const PODE_INICIAR_COM_SISTEMA = EMPACOTADO && (WINDOWS || LINUX);
+
 function itemDeInicio() {
-  // O portátil se extrai numa pasta temporária: o que fica é o .exe que o usuário abriu.
-  return { path: process.env.PORTABLE_EXECUTABLE_FILE || process.execPath, args: ['--oculto'] };
+  // O portátil/AppImage roda de uma pasta temporária: o que fica é o arquivo que o usuário abriu.
+  return {
+    path: process.env.PORTABLE_EXECUTABLE_FILE || process.env.APPIMAGE || process.execPath,
+    args: ['--oculto'],
+  };
 }
 
-function iniciaComWindows() {
-  return EMPACOTADO && app.getLoginItemSettings(itemDeInicio()).openAtLogin;
+/** Um argumento do Exec= de um .desktop: entre aspas, com ", `, $ e \ escapados (especificação XDG). */
+function argumentoDesktop(valor) {
+  return `"${String(valor).replace(/(["`$\\])/g, '\\$1')}"`;
 }
 
-function definirInicioComWindows(ativo) {
-  if (EMPACOTADO) app.setLoginItemSettings({ ...itemDeInicio(), openAtLogin: Boolean(ativo) });
+function iniciaComSistema() {
+  if (!PODE_INICIAR_COM_SISTEMA) return false;
+  if (LINUX) return fs.existsSync(AUTOSTART);
+  return app.getLoginItemSettings(itemDeInicio()).openAtLogin;
+}
+
+function definirInicioComSistema(ativo) {
+  if (!PODE_INICIAR_COM_SISTEMA) return;
+  if (WINDOWS) {
+    app.setLoginItemSettings({ ...itemDeInicio(), openAtLogin: Boolean(ativo) });
+    return;
+  }
+  if (!ativo) {
+    fs.rmSync(AUTOSTART, { force: true });
+    return;
+  }
+  const { path: executavel, args } = itemDeInicio();
+  fs.mkdirSync(path.dirname(AUTOSTART), { recursive: true });
+  fs.writeFileSync(
+    AUTOSTART,
+    [
+      '[Desktop Entry]',
+      'Type=Application',
+      'Name=Comunicador Fiscal',
+      `Exec=${[executavel, ...args].map(argumentoDesktop).join(' ')}`,
+      'X-GNOME-Autostart-enabled=true',
+      'Terminal=false',
+      '',
+    ].join('\n'),
+  );
 }
 
 // ── IPC ──────────────────────────────────────────────────────────────────────
@@ -187,46 +232,33 @@ function enderecosDaRede() {
 }
 
 function lerAcesso() {
-  const p = prefs.ler();
-  return {
-    modo: p.modo,
-    local: { ...p.local, ...servidor.conexao(), enderecos: enderecosDaRede() },
-    remoto: p.remoto,
-  };
+  return { ...prefs.ler().local, ...servidor.conexao(), enderecos: enderecosDaRede() };
 }
 
 function validarAcesso(dados) {
-  const erros = [];
-  const porta = Number(dados?.local?.porta);
-  if (dados?.local && !(Number.isInteger(porta) && porta >= 1024 && porta <= 65535)) {
-    erros.push('A porta precisa ser um número entre 1024 e 65535.');
-  }
-  if (dados?.modo === 'remoto') {
-    const r = dados.remoto || {};
-    if (!/^https?:\/\/[^\s]+$/i.test(r.url || '')) erros.push('Informe a URL do comunicador remoto (http:// ou https://).');
-    if (!r.token) erros.push('Informe o token do comunicador remoto.');
-    if (Buffer.from(r.chave || '', 'base64').length !== 32) erros.push('A chave precisa ter 32 bytes em base64.');
-  }
-  return erros;
+  const porta = Number(dados?.porta);
+  return Number.isInteger(porta) && porta >= 1024 && porta <= 65535
+    ? []
+    : ['A porta precisa ser um número entre 1024 e 65535.'];
 }
 
 function registrarIpc() {
   tratar('estado', async () => {
-    const p = prefs.ler();
     const conexao = conexaoAtiva();
     return {
       versao: app.getVersion(),
-      modo: p.modo,
       url: conexao.url,
       servidorLocal: servidor.estado,
       saude: conexao.url ? await saude(conexao.url) : null,
       pastas: { dados: servidor.pastaDados, lib: servidor.pastaLib },
       lib: {
-        dll: fs.existsSync(path.join(servidor.pastaLib, 'ACBrNFe64.dll')),
+        dll: fs.existsSync(path.join(servidor.pastaLib, NOME_LIB)),
+        nome: NOME_LIB,
         schemas: fs.existsSync(path.join(servidor.pastaLib, 'Schemas')),
       },
-      iniciarComWindows: iniciaComWindows(),
-      podeIniciarComWindows: EMPACOTADO,
+      iniciarComSistema: iniciaComSistema(),
+      podeIniciarComSistema: PODE_INICIAR_COM_SISTEMA,
+      windows: WINDOWS,
     };
   });
   tratar('log', () => servidor.linhas.slice(-200));
@@ -237,8 +269,7 @@ function registrarIpc() {
     const resposta = await chamar(conexaoAtiva(), '/v1/config/token', { token: token || '' });
     if (resposta.ok && resposta.corpo.token) {
       // O comunicador já só aceita o novo: o desktop passa a usá-lo também.
-      if (prefs.ler().modo === 'local') servidor.trocarTokenNoEnv(resposta.corpo.token);
-      else prefs.salvar({ remoto: { token: resposta.corpo.token } });
+      servidor.trocarTokenNoEnv(resposta.corpo.token);
     }
     return resposta;
   });
@@ -256,20 +287,17 @@ function registrarIpc() {
     }
     return { nome: path.basename(arquivo), pfx_base64: fs.readFileSync(arquivo).toString('base64') };
   });
-  // A ACBrLib: baixada e conferida pelo comunicador (app/instalador.py), local ou remoto.
+  // A ACBrLib: baixada e conferida pelo comunicador (app/instalador.py).
   tratar('lib:instalar', async ({ url, sha256 } = {}) => {
     const resposta = await chamar(conexaoAtiva(), '/v1/config/lib', { url: url || '', sha256: sha256 || '' },
       { tempoLimiteMs: 10 * 60_000 });
-    // Local: o pacote fica no .env, e o comunicador o reinstala sozinho se a lib sumir.
-    if (resposta.ok && url && prefs.ler().modo === 'local') {
+    // O pacote fica no .env, e o comunicador o reinstala sozinho se a lib sumir.
+    if (resposta.ok && url) {
       servidor.gravarNoEnv({ ACBRLIB_PACOTE_URL: url, ACBRLIB_SO_SHA256: sha256 || '' });
     }
     return resposta;
   });
   tratar('lib:escolher-pacote', async () => {
-    if (prefs.ler().modo !== 'local') {
-      return { ok: false, mensagem: 'No modo remoto, instale pela URL do pacote.' };
-    }
     const escolha = await dialog.showOpenDialog(janela, {
       title: 'Pacote da ACBrLib',
       properties: ['openFile'],
@@ -283,19 +311,14 @@ function registrarIpc() {
     const erros = validarAcesso(dados);
     if (erros.length) return { ok: false, erros };
     const p = prefs.salvar({
-      modo: dados.modo === 'remoto' ? 'remoto' : 'local',
       local: {
-        porta: Number(dados.local.porta),
-        rede: Boolean(dados.local.rede),
-        origens: String(dados.local.origens || '').trim(),
-        simulador: Boolean(dados.local.simulador),
+        porta: Number(dados.porta),
+        rede: Boolean(dados.rede),
+        origens: String(dados.origens || '').trim(),
+        simulador: Boolean(dados.simulador),
       },
-      ...(dados.modo === 'remoto'
-        ? { remoto: { url: dados.remoto.url.trim(), token: dados.remoto.token.trim(), chave: dados.remoto.chave.trim() } }
-        : {}),
     });
-    if (p.modo === 'local') await servidor.reiniciar(p.local);
-    else await servidor.parar();
+    await servidor.reiniciar(p.local);
     atualizarBandeja();
     return { ok: true, acesso: lerAcesso() };
   });
@@ -309,10 +332,10 @@ function registrarIpc() {
     return shell.openPath(pasta);
   });
   tratar('copiar', (texto) => clipboard.writeText(String(texto ?? '')));
-  tratar('windows:iniciar', (ativo) => {
-    definirInicioComWindows(ativo);
+  tratar('sistema:iniciar', (ativo) => {
+    definirInicioComSistema(ativo);
     atualizarBandeja();
-    return iniciaComWindows();
+    return iniciaComSistema();
   });
 }
 
@@ -335,7 +358,7 @@ function iniciar() {
   });
 
   app.whenReady().then(() => {
-    prefs = new Preferencias(path.join(app.getPath('userData'), 'desktop.json'), safeStorage);
+    prefs = new Preferencias(path.join(app.getPath('userData'), 'desktop.json'));
     servidor = criarServidor();
     servidor.on('estado', (estado) => {
       atualizarBandeja();
@@ -344,8 +367,7 @@ function iniciar() {
     registrarIpc();
     criarBandeja();
     criarJanela();
-    const p = prefs.ler();
-    if (p.modo === 'local') servidor.iniciar(p.local);
+    servidor.iniciar(prefs.ler().local);
   });
 }
 

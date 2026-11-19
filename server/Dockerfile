@@ -6,6 +6,7 @@ FROM python:3.12-slim-bookworm
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    ACBR_MODO=nuvem \
     ACBR_DATA_DIR=/app/data \
     ACBR_LIB_PATH=/app/libs/libacbrnfe64.so \
     ACBR_CONFIG=/app/config/ACBrLib.ini \
@@ -36,17 +37,20 @@ COPY config/ ./config/
 
 # Onde a ACBrLib pode estar, na ordem em que vale (app/motor.py):
 #   1. /app/libs      montada pela instalação (volume ./libs)
-#   2. /opt/acbr      EMBUTIDA na imagem: a que estiver em embutida/, ou a baixada
-#                     no build com --build-arg ACBRLIB_PACOTE_URL e ACBRLIB_SO_SHA256
-#   3. /app/data/lib  instalada sozinha ao subir, do mesmo pacote (padrão: o de referência)
-# O --build-arg fica no histórico da imagem (docker history): com link privado,
-# baixe antes com `python -m app.instalador --destino embutida` (a Action faz assim).
+#   2. /opt/acbr      EMBUTIDA na imagem: a de embutida/, que vem no repositório
+#                     (ACBrLibNFe r48608, licenças em licencas/). Nada é baixado.
+#   3. /app/data/lib  instalada por /v1/config/lib ou ACBRLIB_PACOTE_URL, se alguém
+#                     quiser outra versão sem refazer a imagem.
+# Trocar a embutida no build: --build-arg ACBRLIB_PACOTE_URL e ACBRLIB_SO_SHA256 (o
+# arg fica no histórico da imagem; com link privado, baixe antes para embutida/).
 COPY embutida/ /opt/acbr/
 ARG ACBRLIB_PACOTE_URL=""
 ARG ACBRLIB_SO_SHA256=""
 RUN if [ -n "$ACBRLIB_PACOTE_URL" ]; then \
         python -m app.instalador --url "$ACBRLIB_PACOTE_URL" --sha256 "$ACBRLIB_SO_SHA256" --destino /opt/acbr; \
     fi
+# Depois do RUN: o instalador troca a pasta inteira, e as licenças têm de ficar.
+COPY licencas/ /opt/acbr/LICENCAS/
 ENV LD_LIBRARY_PATH=/app/libs:/opt/acbr:/app/data/lib
 
 EXPOSE 8030

@@ -170,11 +170,24 @@ def test_cli_devolve_json(tmp_path, destino, capsys):
 
 
 # ── o pacote configurado ─────────────────────────────────────────────────────
-def test_sem_variavel_vale_o_pacote_de_referencia(monkeypatch):
+def test_sem_variavel_nada_e_baixado(monkeypatch):
+    """A lib vem no repositório (embutida/, windows/lib/): o padrão é não baixar nada."""
     monkeypatch.delenv("ACBRLIB_PACOTE_URL")
     monkeypatch.delenv("ACBRLIB_SO_SHA256", raising=False)
-    url, sha = instalador.pacote_configurado()
-    assert (url, sha) == instalador.PACOTE_PADRAO["nt" if instalador.WINDOWS else "posix"]
+    assert instalador.pacote_configurado() == ("", "")
+    assert instalador.precisa_instalar() is None
+
+
+def test_as_libs_do_repositorio_sao_as_conferidas():
+    """O SHA-256 publicado em licencas/LEIA-ME.md é o dos arquivos que estão no repositório."""
+    from pathlib import Path
+
+    raiz = Path(__file__).resolve().parent.parent
+    leia_me = (raiz / "licencas" / "LEIA-ME.md").read_text(encoding="utf-8")
+    for lib in (raiz / "embutida" / "libacbrnfe64.so", raiz / "windows" / "lib" / "ACBrNFe64.dll"):
+        assert lib.is_file(), f"falta {lib}"
+        assert instalador.sha256_de(lib) in leia_me, f"o SHA-256 de {lib.name} não é o publicado"
+        assert len(list((lib.parent / "Schemas").glob("*.xsd"))) > 100
 
 
 def test_variavel_vazia_desliga_a_instalacao_automatica(monkeypatch):

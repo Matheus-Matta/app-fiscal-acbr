@@ -1,41 +1,17 @@
-// As preferências do desktop (desktop.json na pasta do usuário): o modo (comunicador
-// local ou Docker remoto) e as opções de cada um. Token e chave do remoto vão cifrados
-// pelo Windows (safeStorage/DPAPI), quando disponível.
+// As preferências do desktop (desktop.json na pasta do usuário): as opções do comunicador
+// local. Nada secreto mora aqui: o token fica no .env do comunicador.
 const fs = require('node:fs');
 const path = require('node:path');
 
 const PADRAO = {
-  modo: 'local',
   local: { porta: 8030, rede: false, origens: '', simulador: false },
-  remoto: { url: '', token: '', chave: '' },
   avisouBandeja: false,
 };
 
-const SEGREDOS = ['token', 'chave'];
-
 class Preferencias {
-  /** @param {string} arquivo  @param {{isEncryptionAvailable(): boolean, encryptString(s: string): Buffer, decryptString(b: Buffer): string}} [cofre] */
-  constructor(arquivo, cofre) {
+  /** @param {string} arquivo */
+  constructor(arquivo) {
     this.arquivo = arquivo;
-    this.cofre = cofre;
-  }
-
-  _abrir(valor) {
-    if (valor && typeof valor === 'object' && valor.cifrado && this.cofre) {
-      try {
-        return this.cofre.decryptString(Buffer.from(valor.cifrado, 'base64'));
-      } catch {
-        return '';
-      }
-    }
-    return typeof valor === 'string' ? valor : '';
-  }
-
-  _fechar(valor) {
-    if (valor && this.cofre?.isEncryptionAvailable()) {
-      return { cifrado: this.cofre.encryptString(valor).toString('base64') };
-    }
-    return valor;
   }
 
   ler() {
@@ -45,29 +21,18 @@ class Preferencias {
     } catch {
       gravado = {};
     }
-    const remoto = { ...PADRAO.remoto, ...gravado.remoto };
-    for (const campo of SEGREDOS) remoto[campo] = this._abrir(remoto[campo]);
+    // Versões anteriores tinham um modo "remoto" (token e chave de um Docker): fica de fora.
     return {
-      ...PADRAO,
-      ...gravado,
-      modo: gravado.modo === 'remoto' ? 'remoto' : 'local',
       local: { ...PADRAO.local, ...gravado.local },
-      remoto,
+      avisouBandeja: Boolean(gravado.avisouBandeja),
     };
   }
 
   salvar(mudancas) {
     const atual = this.ler();
-    const novo = {
-      ...atual,
-      ...mudancas,
-      local: { ...atual.local, ...mudancas.local },
-      remoto: { ...atual.remoto, ...mudancas.remoto },
-    };
-    const gravar = { ...novo, remoto: { ...novo.remoto } };
-    for (const campo of SEGREDOS) gravar.remoto[campo] = this._fechar(novo.remoto[campo]);
+    const novo = { ...atual, ...mudancas, local: { ...atual.local, ...mudancas.local } };
     fs.mkdirSync(path.dirname(this.arquivo), { recursive: true });
-    fs.writeFileSync(this.arquivo, JSON.stringify(gravar, null, 2), { encoding: 'utf8', mode: 0o600 });
+    fs.writeFileSync(this.arquivo, JSON.stringify(novo, null, 2), { encoding: 'utf8', mode: 0o600 });
     return novo;
   }
 }

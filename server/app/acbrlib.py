@@ -53,6 +53,9 @@ class AcbrLib:
         if schemas:
             # O do .ini aponta /app/libs; a lib embutida tem os seus em /opt/acbr.
             self._ok(self.lib.NFE_ConfigGravarValor(self.handle, _c("NFe"), _c("PathSchemas"), _c(schemas)))
+        # Nos dois modos o XML só volta na resposta: nenhuma cópia fica no comunicador.
+        # Guardar a nota é do cliente. Gravado aqui também, caso o .ini diga outra coisa.
+        self._ok(self.lib.NFE_ConfigGravarValor(self.handle, _c("NFe"), _c("SalvarGer"), _c("0")))
 
     # ── chamadas de baixo nível ───────────────────────────────────────────
     @contextlib.contextmanager
@@ -64,7 +67,20 @@ class AcbrLib:
         try:
             yield
         finally:
-            self.trava.release()
+            try:
+                self._esquecer_segredos()
+            finally:
+                self.trava.release()
+
+    def _esquecer_segredos(self):
+        """O A1, a senha e o CSC não ficam na lib entre uma chamada e outra.
+
+        Cada chamada grava os seus de novo (`_configurar`). Falhar aqui não pode
+        esconder o resultado da nota: o erro é ignorado.
+        """
+        for secao, chave in (("DFe", "DadosPFX"), ("DFe", "Senha"), ("NFe", "IdCSC"), ("NFe", "CSC")):
+            with contextlib.suppress(Exception):
+                self.lib.NFE_ConfigGravarValor(self.handle, _c(secao), _c(chave), _c(""))
 
     def _ok(self, codigo, enviando=False):
         if codigo < 0:

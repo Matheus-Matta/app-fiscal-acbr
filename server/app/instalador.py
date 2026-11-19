@@ -13,8 +13,9 @@ valer em qualquer lugar (Docker, serviço Windows, desktop):
   só substitui a antiga depois de pronta.
 - Nunca derruba o comunicador: sem a lib ele sobe igual e diz o que falta.
 
-Sem `ACBRLIB_PACOTE_URL` no ambiente vale o pacote de referência abaixo (só há o de
-Linux); com a variável vazia, a instalação automática fica desligada.
+Sem `ACBRLIB_PACOTE_URL`, nada é baixado: a lib vem no repositório, embutida na imagem
+(`embutida/`) e no `.exe` (`windows/lib/`). O instalador fica para quem quiser trocar
+de versão sem refazer a imagem.
 
     python -m app.instalador [--url URL --sha256 HASH | --arquivo PACOTE] [--destino PASTA]
 """
@@ -38,12 +39,8 @@ log = logging.getLogger("acbr.instalador")
 WINDOWS = os.name == "nt"
 NOME_LIB = "ACBrNFe64.dll" if WINDOWS else "libacbrnfe64.so"
 _CABECALHO = b"MZ" if WINDOWS else b"\x7fELF"
-#: ACBrLibNFe 1.5.0.488 (SVN trunk2 r48608, Linux-x86_64-MT, glibc 2.34+).
-PACOTE_PADRAO = {
-    "posix": ("https://www.mediafire.com/file/hd3t2w7uqc2r6b3/acbr-fiscal-linux-x64.tar.gz/file",
-              "deec61a921b830516ad3d7f5833aee7cb69603391eb497e649296ecc5522b3f0"),
-    "nt": ("", ""),
-}
+#: Nenhum pacote baixado por padrão: a lib vem no repositório (licencas/LEIA-ME.md).
+PACOTE_PADRAO = {"posix": ("", ""), "nt": ("", "")}
 TAMANHO_MAXIMO = 300 * 1024 * 1024
 AGENTE = "Mozilla/5.0"
 _MEDIAFIRE = re.compile(r"https://download\d*\.mediafire\.com/[^\"' <>]+")
@@ -54,7 +51,7 @@ class FalhaNaInstalacao(Exception):
 
 
 def pacote_configurado():
-    """(url, sha256) do ambiente, ou o de referência desta plataforma."""
+    """(url, sha256) do ambiente; sem a variável, nenhum (nada a baixar)."""
     url_padrao, sha_padrao = PACOTE_PADRAO["nt" if WINDOWS else "posix"]
     url = os.environ.get("ACBRLIB_PACOTE_URL")
     if url is None:

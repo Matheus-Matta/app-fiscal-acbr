@@ -18,7 +18,7 @@ contextBridge.exposeInMainWorld('comunicador', {
   reiniciarServidor: () => ipcRenderer.invoke('servidor:reiniciar'),
   abrirPasta: (qual) => ipcRenderer.invoke('pasta:abrir', qual),
   copiar: (texto) => ipcRenderer.invoke('copiar', texto),
-  iniciarComWindows: (ativo) => ipcRenderer.invoke('windows:iniciar', ativo),
+  iniciarComSistema: (ativo) => ipcRenderer.invoke('sistema:iniciar', ativo),
   aoMudarServidor: (funcao) => {
     const ouvinte = (_evento, estado) => funcao(estado);
     ipcRenderer.on('servidor:estado', ouvinte);

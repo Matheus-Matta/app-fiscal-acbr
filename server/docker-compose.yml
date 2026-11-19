@@ -3,10 +3,12 @@ services:
     build: .
     env_file: .env
     ports:
+      # Nuvem: atrás de um proxy HTTPS. Modo local num PC da loja: troque por
+      # "127.0.0.1:${ACBR_PORTA:-8030}:8030" se só esta máquina chama o comunicador.
       - "${ACBR_PORTA:-8030}:8030"
     volumes:
       # libacbrnfe64.so e a pasta Schemas (Projeto ACBr)
       - ./libs:/app/libs:ro
-      # Log da lib e XML das notas
+      # A lib instalada e o log. No modo local, também os emitentes. XML não fica gravado.
       - ./data:/app/data
     restart: unless-stopped
