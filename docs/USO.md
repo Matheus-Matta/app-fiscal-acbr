@@ -87,19 +87,18 @@ São três telas, no menu à esquerda.
 
 ### Emitente — a primeira vez
 
-Substitui o login: é aqui que o comunicador aprende quem emite.
+Aqui ficam só os segredos do emitente, o que não pode vazar:
 
 | Campo | |
 |---|---|
-| CNPJ, UF | da empresa |
-| Ambiente | **Homologação** para testar; **Produção** só depois do [roteiro](#8-de-homologação-para-produção) |
-| Modelo | NFC-e (65) ou NF-e (55) |
-| Fuso | o da loja: `-03:00` (Brasília); `-04:00` no AM, MT, MS, RO e RR; `-05:00` no AC |
+| CNPJ | da empresa: identifica de quem são o certificado e o CSC |
 | Certificado A1 | o arquivo `.pfx` e a senha. É conferido na hora: senha, validade e CNPJ (o da matriz vale para as filiais) |
 | CSC | o ID e o código do CSC, gerados no portal da SEFAZ da UF (NFC-e). Homologação e produção têm CSCs diferentes |
 
-Tudo fica guardado cifrado no próprio computador. Mais de uma empresa? Cadastre cada CNPJ;
-o PDV informa o `cnpj` em cada chamada.
+Tudo fica guardado cifrado no próprio computador. Os dados da emissão — UF, ambiente
+(homologação/produção), modelo (NFC-e/NF-e), fuso, regime, CST, IBS/CBS — **não** se
+configuram aqui: o PDV os manda em cada emissão ([API, seção 4](API.md#4-o-contexto-do-emitente)).
+Mais de uma empresa? Cadastre cada CNPJ; o PDV informa o `cnpj` em cada chamada.
 
 ### Acesso e conexão — o que vai para o PDV
 
@@ -117,8 +116,8 @@ neste computador.
 ### Status
 
 - **Comunicador**: se está ativo e se a ACBrLib está carregada ("Pronto para emitir").
-- **SEFAZ → Testar comunicação**: consulta o serviço da SEFAZ com o emitente e o certificado
-  configurados. É o teste final da configuração.
+- **SEFAZ → Testar comunicação**: consulta o serviço da SEFAZ com o certificado guardado, na
+  UF, ambiente e modelo escolhidos ali. É o teste final da configuração.
 - **Iniciar com o Windows / com o sistema**: abre direto na bandeja ao ligar o PC.
 - **Registro do comunicador**: o log, para diagnóstico.
 
@@ -217,7 +216,7 @@ O emitente se grava pela API, **do próprio servidor**:
 ```bash
 curl -s http://127.0.0.1:8030/v1/config/emitente -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" -d @- <<EOF
-{"cnpj": "11222333000181", "uf": "SP", "ambiente": "2", "modelo": "65", "fuso": "-03:00",
+{"cnpj": "11222333000181",
  "certificado": {"pfx_base64": "$(base64 -w0 a1.pfx)", "senha": "..."},
  "csc": {"id": "1", "token": "..."}}
 EOF
@@ -254,7 +253,7 @@ Teste tudo em **homologação** (ambiente 2), com o A1 e o CSC de homologação:
 Em homologação, o primeiro item da NFC-e precisa ser "NOTA FISCAL EMITIDA EM AMBIENTE DE
 HOMOLOGACAO - SEM VALOR FISCAL" (rejeição 373).
 
-Para produção: troque o **ambiente** para 1, o **CSC** pelo de produção, desligue a **SEFAZ
+Para produção: o PDV passa a mandar `"ambiente": "1"`; troque o **CSC** pelo de produção, desligue a **SEFAZ
 simulada** e confira o **próximo número** da série (notas de homologação não ocupam números
 de produção).
 
@@ -282,7 +281,7 @@ de produção).
 | `sigilo` / `cifra_no_modo_local` | o PDV ainda cifra, mas o comunicador é local | no local, mandar JSON comum, só com o token |
 | `configuracao` / `senha_invalida`, `certificado_vencido`, `cnpj_diferente` | o A1 | trocar o `.pfx` ou a senha |
 | `configuracao` / `acbrlib_ausente`, ou `/health` 503 | a ACBrLib não carregou | ver o `mensagem` do `/health`; no Linux, conferir `libxml2` e `libssl3` |
-| Rejeição 704 (data de emissão) | fuso errado | ajustar o **fuso** do emitente |
+| Rejeição 704 (data de emissão) | fuso errado | o PDV deve mandar o **fuso** da loja na chamada |
 | Rejeição 539/613 (número repetido) | dois emissores na mesma série | uma série por caixa |
 | A porta 8030 está em uso | outro comunicador (ou o serviço Windows) aberto | fechar o outro, ou trocar a porta em Acesso |
 

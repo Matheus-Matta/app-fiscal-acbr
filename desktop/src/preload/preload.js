@@ -9,7 +9,7 @@ contextBridge.exposeInMainWorld('comunicador', {
   salvarEmitente: (dados) => ipcRenderer.invoke('config:emitente', dados),
   removerEmitente: (cnpj) => ipcRenderer.invoke('config:remover', cnpj),
   trocarToken: (token) => ipcRenderer.invoke('config:token', token),
-  statusSefaz: (cnpj) => ipcRenderer.invoke('sefaz:status', cnpj),
+  statusSefaz: (dados) => ipcRenderer.invoke('sefaz:status', dados),
   escolherCertificado: () => ipcRenderer.invoke('certificado:escolher'),
   instalarLib: (dados) => ipcRenderer.invoke('lib:instalar', dados),
   instalarLibDeArquivo: () => ipcRenderer.invoke('lib:escolher-pacote'),

@@ -3,6 +3,8 @@ import { api, Aviso, Campo, Cartao, Indicador, mensagemDe } from '../comum';
 
 const MOTOR = { acbrlib: 'ACBrLib', simulador: 'SEFAZ simulada', ausente: 'ACBrLib não instalada' };
 const SITUACAO = { parado: 'Parado', iniciando: 'Iniciando', rodando: 'Rodando', erro: 'Com erro' };
+const UFS = ['AC', 'AL', 'AM', 'AP', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MG', 'MS', 'MT', 'PA', 'PB', 'PE', 'PI',
+  'PR', 'RJ', 'RN', 'RO', 'RR', 'RS', 'SC', 'SE', 'SP', 'TO'];
 
 /** A ACBrLib: o comunicador a baixa, confere o SHA-256 e instala sozinho (server/app/instalador.py). */
 function Biblioteca({ estado, atualizar, lib }) {
@@ -102,6 +104,9 @@ function Biblioteca({ estado, atualizar, lib }) {
 export default function Status({ estado, atualizar }) {
   const [teste, setTeste] = useState(null);
   const [testando, setTestando] = useState(false);
+  // Não ficam guardados no comunicador: no PDV, vêm em cada emissão.
+  const [dadosTeste, setDadosTeste] = useState({ uf: 'SP', ambiente: '2', modelo: '65' });
+  const mudarTeste = (campo) => (e) => setDadosTeste({ ...dadosTeste, [campo]: e.target.value });
   const [linhas, setLinhas] = useState([]);
   const [reiniciando, setReiniciando] = useState(false);
 
@@ -112,7 +117,7 @@ export default function Status({ estado, atualizar }) {
 
   const testarSefaz = async () => {
     setTestando(true);
-    setTeste(await api.statusSefaz());
+    setTeste(await api.statusSefaz(dadosTeste));
     setTestando(false);
   };
 
@@ -176,7 +181,29 @@ export default function Status({ estado, atualizar }) {
           </button>
         }
       >
-        <p className="nota">Consulta o status do serviço da SEFAZ com o emitente e o certificado configurados.</p>
+        <p className="nota">
+          Consulta o status do serviço da SEFAZ com o certificado guardado. UF, ambiente e modelo não ficam guardados:
+          informe-os aqui, como o PDV faz em cada emissão.
+        </p>
+        <div className="grade">
+          <Campo rotulo="UF">
+            <select value={dadosTeste.uf} onChange={mudarTeste('uf')}>
+              {UFS.map((uf) => <option key={uf}>{uf}</option>)}
+            </select>
+          </Campo>
+          <Campo rotulo="Ambiente">
+            <select value={dadosTeste.ambiente} onChange={mudarTeste('ambiente')}>
+              <option value="2">Homologação (testes)</option>
+              <option value="1">Produção</option>
+            </select>
+          </Campo>
+          <Campo rotulo="Documento">
+            <select value={dadosTeste.modelo} onChange={mudarTeste('modelo')}>
+              <option value="65">NFC-e (modelo 65)</option>
+              <option value="55">NF-e (modelo 55)</option>
+            </select>
+          </Campo>
+        </div>
         {teste && teste.ok && (
           <Aviso tipo={teste.corpo.online ? 'ok' : 'alerta'}>
             {teste.corpo.online ? 'SEFAZ em operação' : 'SEFAZ indisponível: as notas sairão em contingência'}

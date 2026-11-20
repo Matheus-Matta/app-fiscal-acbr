@@ -5,7 +5,7 @@ Emite NFC-e/NF-e pela ACBrLib. A mesma API roda em dois modos (`ACBR_MODO`):
 | Modo | Onde | Como o PDV/ERP chama |
 |---|---|---|
 | **nuvem** | [`server/`](server/README.md) — Docker num servidor da internet | Só por API: token **e** corpo cifrado com a chave do `.env`. O emitente (certificado A1, senha, CSC, UF, CNPJ) vai em toda chamada e nunca é gravado; o XML volta na resposta e não fica no servidor. Não sobe com token fraco; bloqueia quem erra o token. |
-| **local** | [`desktop/`](desktop/README.md) — `.exe` portátil (Windows) ou AppImage (Linux); [`server/windows`](server/README.md#windows-exe) — serviço Windows; ou o Docker na loja | Só o token. O XML também só volta na resposta. O emitente é configurado nesta máquina (tela do desktop) e o PDV manda só o documento. Funciona sem internet, com a contingência offline local. A configuração só se altera da própria máquina. |
+| **local** | [`desktop/`](desktop/README.md) — `.exe` portátil (Windows) ou AppImage (Linux); [`server/windows`](server/README.md#windows-exe) — serviço Windows; ou o Docker na loja | Só o token. O XML também só volta na resposta. Só os segredos do emitente (certificado A1, senha, CSC) ficam nesta máquina (tela do desktop); o PDV manda os dados da emissão (UF, ambiente, modelo) e o documento. Funciona sem internet, com a contingência offline local. A configuração só se altera da própria máquina. |
 
 A ACBrLib (Linux e Windows) vem neste repositório, com as licenças em
 [`server/licencas`](server/licencas/LEIA-ME.md): nada é baixado para emitir.

@@ -273,7 +273,9 @@ function registrarIpc() {
     }
     return resposta;
   });
-  tratar('sefaz:status', (cnpj) => chamar(conexaoAtiva(), '/v1/status-servico', cnpj ? { cnpj } : {}));
+  // UF, ambiente e modelo não ficam guardados: o teste os informa, como o PDV na emissão.
+  tratar('sefaz:status', ({ cnpj, uf, ambiente, modelo } = {}) =>
+    chamar(conexaoAtiva(), '/v1/status-servico', { ...(cnpj ? { cnpj } : {}), uf, ambiente, modelo }));
   tratar('certificado:escolher', async () => {
     const escolha = await dialog.showOpenDialog(janela, {
       title: 'Certificado A1',

@@ -269,26 +269,29 @@ def _rota(caminho, modelo, funcao, *, configuracao_local=False):
     app.post(caminho, dependencies=dependencias)(executar)
 
 
-#: Na nuvem não há emitente guardado para completar a chamada. `ambiente` e `modelo`
-#: têm padrão no contrato ("2", "65"): sem exigi-los, quem esquecesse o ambiente
-#: emitiria em homologação achando que era produção.
-_EMITENTE_NA_CHAMADA = ("cnpj", "uf", "ambiente", "modelo")
+#: Os dados da emissão vêm sempre na chamada, nos dois modos: no local só os segredos
+#: (A1 e CSC) ficam guardados. `ambiente` e `modelo` têm padrão no contrato ("2", "65"):
+#: sem exigi-los, quem esquecesse o ambiente emitiria em homologação achando que era
+#: produção. No local, o `cnpj` pode faltar quando há um só emitente guardado.
+_DADOS_NA_CHAMADA = ("cnpj", "uf", "ambiente", "modelo")
 
 
-def _emitente_da_chamada(pedido):
-    """Nuvem: nada guardado — quem emite, onde e com qual A1 vem na chamada."""
-    faltando = [campo for campo in _EMITENTE_NA_CHAMADA
-                if campo not in pedido.model_fields_set or not getattr(pedido, campo)]
+def _dados_da_chamada(pedido, campos):
+    faltando = [campo for campo in campos if campo not in pedido.model_fields_set or not getattr(pedido, campo)]
     if faltando:
+        extra = " (e o certificado e o CSC, se a nota precisar)" if NUVEM else ""
         raise sefaz.FalhaDeConfiguracao(
-            f"No modo nuvem a chamada traz o emitente: faltou {', '.join(faltando)} "
-            "(e o certificado e o CSC, se a nota precisar).", "dados_do_emitente_ausentes")
+            f"A chamada traz os dados da emissão: faltou {', '.join(faltando)}{extra}.",
+            "dados_do_emitente_ausentes")
     return pedido
 
 
 def _fiscal(nome):
     def chamar(pedido):
-        pedido = _emitente_da_chamada(pedido) if NUVEM else configuracao.completar(pedido)
+        if NUVEM:
+            pedido = _dados_da_chamada(pedido, _DADOS_NA_CHAMADA)
+        else:
+            pedido = configuracao.completar(_dados_da_chamada(pedido, _DADOS_NA_CHAMADA[1:]))
         conferido = certificados.conferir(pedido, exigir=motor.nome == "acbrlib")
         return getattr(motor, nome)(conferido)
 

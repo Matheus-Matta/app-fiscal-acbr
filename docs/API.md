@@ -30,7 +30,7 @@ A mesma API roda em dois modos, escolhidos no comunicador por `ACBR_MODO`:
 | Endereço | `https://fiscal.suaempresa.com.br` (atrás de um proxy HTTPS) | `http://127.0.0.1:8030`, ou `http://<IP do PC>:8030` na rede da loja |
 | Cabeçalho | `Authorization: Bearer <token>` | `Authorization: Bearer <token>` |
 | Corpo | **envelope cifrado** ([seção 3](#3-a-cifra-de-ponta-a-ponta-modo-nuvem)) | JSON comum |
-| Emitente (CNPJ, UF, A1, CSC) | **em toda chamada** | guardado no comunicador; a chamada traz só o documento |
+| Emitente (CNPJ, UF, A1, CSC) | **em toda chamada** | A1 e CSC guardados no comunicador; a chamada traz UF, ambiente, modelo e o documento |
 | Rotas de configuração | `/v1/config/ler` e `/v1/config/lib` | todas, **só do próprio computador** |
 
 Para saber em que modo um comunicador está: `GET /health` → `"modo"`.
@@ -137,9 +137,9 @@ Toda operação fiscal aceita estes campos, além dos seus próprios:
 | Campo | Tipo | Valores | Nuvem | Local |
 |---|---|---|---|---|
 | `cnpj` | texto | 14 posições (12 alfanuméricas + 2 dígitos; aceita pontuação) | **obrigatório** | opcional (único emitente guardado) |
-| `uf` | texto | `AC` … `TO` | **obrigatório** | opcional |
-| `ambiente` | texto | `"1"` produção, `"2"` homologação | **obrigatório** | opcional (padrão: o guardado) |
-| `modelo` | texto | `"65"` NFC-e, `"55"` NF-e | **obrigatório** | opcional (padrão: o guardado) |
+| `uf` | texto | `AC` … `TO` | **obrigatório** | **obrigatório** |
+| `ambiente` | texto | `"1"` produção, `"2"` homologação | **obrigatório** | **obrigatório** |
+| `modelo` | texto | `"65"` NFC-e, `"55"` NF-e | **obrigatório** | **obrigatório** |
 | `fuso` | texto | `"-03:00"`; vazio = o do sistema | opcional | opcional |
 | `certificado` | objeto | `{"pfx_base64": "<.pfx em base64>", "senha": "..."}` | obrigatório com a ACBrLib | opcional (o guardado) |
 | `csc` | objeto | `{"id": "1", "token": "..."}` (NFC-e) | obrigatório na NFC-e | opcional (o guardado) |
@@ -150,9 +150,11 @@ Toda operação fiscal aceita estes campos, além dos seus próprios:
 pode virar uma nota de homologação que o cliente acha que é de produção. Nada disso é
 gravado; o certificado só passa pela memória da lib e é apagado ao fim da chamada.
 
-**Local:** campo que vem na chamada vale sobre o guardado; certificado e CSC vazios na
-chamada = os guardados. Sem `cnpj` vale o único emitente; com mais de um →
-`emitente_nao_informado`.
+**Local:** só os segredos ficam guardados (certificado A1 + senha e CSC, pelo CNPJ). Os
+dados da emissão — `uf`, `ambiente`, `modelo`, `fuso`, e no INI o regime, CST, CSOSN,
+IBS/CBS — vêm em toda chamada; sem `uf`, `ambiente` ou `modelo` → `configuracao`,
+`dados_do_emitente_ausentes`. Certificado e CSC vazios na chamada = os guardados. Sem
+`cnpj` vale o único emitente; com mais de um → `emitente_nao_informado`.
 
 **Conferência do certificado**, antes de chegar à lib (a recusa é `configuracao`, nunca
 contingência): `certificado_ausente`, `senha_invalida`, `certificado_invalido`,
@@ -197,8 +199,8 @@ Corpo: só o contexto. Diz se a SEFAZ da UF está atendendo.
 | `tp_emis` | não | `"1"` normal (padrão) · `"9"` contingência offline da NFC-e: **só assina**, não transmite |
 
 ```json
-// local, emitente guardado
-{"ini": "[Identificacao]\ncNF=12345678\nmod=65\nserie=1\nnNF=42\n..."}
+// local, certificado e CSC guardados
+{"uf": "SP", "ambiente": "1", "modelo": "65", "fuso": "-03:00", "ini": "[Identificacao]\ncNF=12345678\nmod=65\nserie=1\nnNF=42\n..."}
 // → 200
 {"situacao": "autorizada", "cstat": "100", "motivo": "Autorizado o uso da NF-e",
  "chave": "35261011222333000181650010000000421123456786", "protocolo": "135260000000042",
@@ -279,7 +281,7 @@ Corpo `{}`. Nada secreto volta: do certificado, só titular e validade; do CSC, 
 ```json
 // local → 200
 {"modo": "local", "motor": "acbrlib", "token": "configurado",
- "emitentes": [{"cnpj": "11222333000181", "uf": "SP", "ambiente": "2", "modelo": "65", "fuso": "-03:00",
+ "emitentes": [{"cnpj": "11222333000181",
    "certificado": {"presente": true, "titular": "EMPRESA LTDA:11222333000181", "cnpj": "11222333000181",
                    "vence_em": "2027-03-01", "vencido": false},
    "csc": {"id": "1", "configurado": true}}],
@@ -291,11 +293,12 @@ nuvem, a resposta traz só `modo`, `motor` e `lib`.
 
 ### `POST /v1/config/emitente` (local)
 
-Grava (ou atualiza) um emitente. O A1 é conferido na hora (senha, validade, CNPJ), com as
-mesmas recusas da emissão.
+Grava (ou atualiza) os segredos de um emitente: só o certificado A1 + senha e o CSC, pelo
+CNPJ. UF, ambiente, modelo e fuso não se gravam (vêm em cada emissão; se vierem aqui, são
+ignorados). O A1 é conferido na hora (senha, validade, CNPJ), com as mesmas recusas da emissão.
 
 ```json
-{"cnpj": "11.222.333/0001-81", "uf": "SP", "ambiente": "2", "modelo": "65", "fuso": "-03:00",
+{"cnpj": "11.222.333/0001-81",
  "certificado": {"pfx_base64": "MIIK...", "senha": "..."}, "csc": {"id": "1", "token": "..."}}
 ```
 
@@ -370,7 +373,7 @@ mostrar.
 | `incerto` | `falha_interna` | erro inesperado no comunicador (detalhe no log dele) |
 | `documento_invalido` | `campos_invalidos` | campo fora do contrato ou JSON quebrado (só o nome do campo volta, nunca o valor) |
 | `configuracao` | `certificado_ausente`, `senha_invalida`, `certificado_invalido`, `certificado_vencido`, `cnpj_diferente` | o A1 |
-| `configuracao` | `dados_do_emitente_ausentes` | nuvem: faltou `cnpj`, `uf`, `ambiente` ou `modelo` |
+| `configuracao` | `dados_do_emitente_ausentes` | faltou `uf`, `ambiente` ou `modelo` (e, na nuvem, `cnpj`) |
 | `configuracao` | `emitente_nao_configurado`, `emitente_nao_informado` | local: nenhum emitente, ou mais de um e sem `cnpj` |
 | `configuracao` | `configuracao_ilegivel`, `cofre_sem_chave` | local: o cofre não abre com a `ACBR_CHAVE_COFRE` |
 | `configuracao` | `acbrlib_ausente` | o comunicador está sem a lib |

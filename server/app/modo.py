@@ -14,8 +14,9 @@
 **local** — o desktop, o serviço Windows ou um Docker na máquina da loja:
 
 - toda rota `/v1` exige só o token; o corpo é JSON comum, sem cifra;
-- o emitente fica guardado, cifrado com a `ACBR_CHAVE_COFRE` (`configuracao.py`), e o
-  PDV manda só o documento;
+- os segredos do emitente (A1, senha, CSC) ficam guardados, cifrados com a
+  `ACBR_CHAVE_COFRE` (`configuracao.py`), e o PDV manda os dados da emissão (UF,
+  ambiente, modelo, fuso) e o documento;
 - as rotas `/v1/config/*`, que trocam certificado e token, só atendem a própria
   máquina (`ACBR_CONFIG_REDES`, padrão 127.0.0.1 e ::1). Um PDV da rede emite, mas
   não reconfigura.

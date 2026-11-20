@@ -1,16 +1,19 @@
-"""A configuração guardada do modo local: os emitentes (certificado, CSC, UF...) e o token.
+"""A configuração guardada do modo local: os segredos dos emitentes (certificado, CSC) e o token.
 
 Só no modo local (`modo.py`): na nuvem nada disto é gravado, e o emitente vem em
-toda chamada. Fica na pasta de dados (`ACBR_DATA_DIR`: `/app/data` no Docker, a do
-usuário no desktop, `%PROGRAMDATA%\\AcbrFiscal` no serviço Windows) e é gravada pelas
-rotas `/v1/config/*`, que o desktop usa e que só atendem a própria máquina.
+toda chamada. Mesmo no local, só fica guardado o que não pode vazar (o A1, a senha
+dele e o CSC), pelo CNPJ: UF, ambiente, modelo e fuso vêm em cada emissão.
 
-- `configuracao.bin`: os emitentes, cifrados com AES-256-GCM e uma chave derivada
-  da `ACBR_CHAVE_COFRE`. Trocar a chave deixa o arquivo ilegível: cadastre de novo.
+Fica na pasta de dados (`ACBR_DATA_DIR`: `/app/data` no Docker, a do usuário no
+desktop, `%PROGRAMDATA%\\AcbrFiscal` no serviço Windows) e é gravada pelas rotas
+`/v1/config/*`, que o desktop usa e que só atendem a própria máquina.
+
+- `configuracao.bin`: os segredos dos emitentes, cifrados com AES-256-GCM e uma
+  chave derivada da `ACBR_CHAVE_COFRE`. Trocar a chave deixa o arquivo ilegível: cadastre de novo.
 - `acesso.json`: o SHA-256 do token trocado pela API. Ele vale no lugar do
   `ACBRLIB_TOKEN` do .env; apagar o arquivo devolve o acesso ao token do .env.
 
-A chamada ainda pode trazer os dados: o que vier nela vale sobre o guardado.
+A chamada ainda pode trazer o certificado e o CSC: o que vier nela vale sobre o guardado.
 """
 import hashlib
 import json
@@ -89,37 +92,31 @@ def _salvar(dados):
 
 
 def completar(pedido):
-    """O pedido com o que faltou preenchido pelo emitente guardado.
+    """O pedido com os segredos do emitente guardado: certificado e CSC.
 
-    Sem CNPJ na chamada, vale o único emitente cadastrado. Campo que a chamada
-    trouxe vale sobre o guardado; certificado e CSC vazios na chamada = os guardados.
+    Sem CNPJ na chamada, vale o único emitente cadastrado. Certificado e CSC
+    vazios na chamada = os guardados. UF, ambiente, modelo e fuso não vêm daqui:
+    vêm na chamada (`main._dados_da_chamada`).
     """
     emitentes = _ler()["emitentes"]
     cnpj = pedido.cnpj
     if not cnpj and len(emitentes) == 1:
         cnpj = next(iter(emitentes))
-    guardado = emitentes.get(cnpj)
-    if guardado:
-        definidos = pedido.model_fields_set
-        mudancas = {"cnpj": cnpj}
-        for campo in ("uf", "ambiente", "modelo", "fuso"):
-            if campo not in definidos or not getattr(pedido, campo):
-                mudancas[campo] = guardado.get(campo, "")
-        if not pedido.certificado.pfx_base64 and guardado.get("certificado"):
-            mudancas["certificado"] = modelos.Certificado(**guardado["certificado"])
-        if not pedido.csc.token and guardado.get("csc"):
-            mudancas["csc"] = modelos.Csc(**guardado["csc"])
-        pedido = pedido.model_copy(update=mudancas)
-
-    if not pedido.cnpj or not pedido.uf:
-        if len(emitentes) > 1 and not pedido.cnpj:
+    if not cnpj:
+        if len(emitentes) > 1:
             raise sefaz.FalhaDeConfiguracao("Há mais de um emitente cadastrado: informe o cnpj na chamada.",
                                             "emitente_nao_informado")
         raise sefaz.FalhaDeConfiguracao(
-            "Nenhum emitente configurado para esta chamada: cadastre o CNPJ, a UF e o certificado "
-            "no Comunicador Fiscal (desktop) ou em /v1/config/emitente, ou envie-os na chamada.",
+            "Nenhum emitente configurado para esta chamada: cadastre o CNPJ e o certificado no "
+            "Comunicador Fiscal (desktop) ou em /v1/config/emitente, ou envie-os na chamada.",
             "emitente_nao_configurado")
-    return pedido
+    mudancas = {"cnpj": cnpj}
+    guardado = emitentes.get(cnpj) or {}
+    if not pedido.certificado.pfx_base64 and guardado.get("certificado"):
+        mudancas["certificado"] = modelos.Certificado(**guardado["certificado"])
+    if not pedido.csc.token and guardado.get("csc"):
+        mudancas["csc"] = modelos.Csc(**guardado["csc"])
+    return pedido.model_copy(update=mudancas)
 
 
 def resumo():
@@ -128,8 +125,7 @@ def resumo():
     for cnpj, dados in sorted(_ler()["emitentes"].items()):
         certificado, csc = dados.get("certificado") or {}, dados.get("csc") or {}
         emitentes.append({
-            "cnpj": cnpj, "uf": dados["uf"], "ambiente": dados["ambiente"], "modelo": dados["modelo"],
-            "fuso": dados.get("fuso", ""),
+            "cnpj": cnpj,
             "certificado": certificados.descrever(certificado.get("pfx_base64", ""), certificado.get("senha", "")),
             "csc": {"id": csc.get("id", ""), "configurado": bool(csc.get("token"))},
         })
@@ -145,14 +141,12 @@ def salvar_emitente(emitente: modelos.Emitente):
         csc = emitente.csc.model_dump() if emitente.csc is not None else anterior.get("csc") or {"id": "", "token": ""}
         if certificado["pfx_base64"]:
             # As mesmas recusas da emissão, agora na hora de gravar: senha, validade, CNPJ.
-            certificados.conferir(modelos.Contexto(cnpj=emitente.cnpj, uf=emitente.uf,
+            certificados.conferir(modelos.Contexto(cnpj=emitente.cnpj,
                                                    certificado=modelos.Certificado(**certificado)), exigir=True)
-        dados["emitentes"][emitente.cnpj] = {
-            "uf": emitente.uf, "ambiente": emitente.ambiente, "modelo": emitente.modelo, "fuso": emitente.fuso,
-            "certificado": certificado, "csc": csc,
-        }
+        # Só os segredos: o que uma versão anterior guardou (UF, ambiente...) cai aqui.
+        dados["emitentes"][emitente.cnpj] = {"certificado": certificado, "csc": csc}
         _salvar(dados)
-    log.info("emitente %s gravado (UF %s, ambiente %s)", emitente.cnpj, emitente.uf, emitente.ambiente)
+    log.info("emitente %s gravado", emitente.cnpj)
     return resumo()
 
 

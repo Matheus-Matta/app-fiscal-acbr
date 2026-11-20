@@ -2,8 +2,9 @@
 
 Um arquivo só, sem instalador, para o computador da loja — **Windows** (`.exe` portátil) ou
 **Linux** (AppImage). Ele abre a tela de configuração e
-sobe por baixo o comunicador ([`../server`](../server/README.md)) no **modo local**: o
-emitente é configurado aqui, e o PDV chama só com o token. Sem internet, a nota sai em
+sobe por baixo o comunicador ([`../server`](../server/README.md)) no **modo local**: os
+segredos do emitente (certificado A1, senha, CSC) são configurados aqui, e o PDV chama com
+o token e os dados da emissão (UF, ambiente, modelo, fuso; regime e CST no INI). Sem internet, a nota sai em
 contingência offline ali mesmo.
 
 O Docker na nuvem não se configura por aqui: lá o emitente vai em cada chamada do PDV/ERP
@@ -35,8 +36,8 @@ no nome, vão para o Release, com o `SHA256SUMS.txt`.
 
 | Tela | O que faz |
 |---|---|
-| **Status** | Se o comunicador está no ar, se a ACBrLib está instalada, teste da SEFAZ e o registro do comunicador. |
-| **Emitente** | Substitui o login: CNPJ, UF, ambiente, modelo, fuso, certificado A1 (.pfx + senha) e CSC. Ficam guardados e cifrados no comunicador; o A1 é conferido ao gravar. |
+| **Status** | Se o comunicador está no ar, se a ACBrLib está instalada, teste da SEFAZ (na UF, ambiente e modelo escolhidos) e o registro do comunicador. |
+| **Emitente** | Só os segredos: CNPJ, certificado A1 (.pfx + senha) e CSC. Ficam guardados e cifrados no comunicador; o A1 é conferido ao gravar. UF, ambiente, modelo e fuso vêm do PDV em cada emissão. |
 | **Acesso e conexão** | O endereço e o token que o PDV usa. Gera um token novo. Porta, PDVs da rede local, origens de navegador e SEFAZ simulada. |
 
 O emitente, o certificado e o token só se alteram neste computador: um PDV da rede emite,
@@ -67,10 +68,10 @@ existir.
 
 Chama `http://127.0.0.1:8030` (ou o IP deste PC, com "Aceitar PDVs da rede local") com o
 token no cabeçalho `Authorization: Bearer` e o corpo em JSON comum, sem cifra. Com o
-emitente cadastrado, basta enviar o documento:
+certificado e o CSC cadastrados, envia os dados da emissão e o documento:
 
 ```json
-POST /v1/nfe/emitir   {"ini": "..."}
+POST /v1/nfe/emitir   {"uf": "SP", "ambiente": "1", "modelo": "65", "fuso": "-03:00", "ini": "..."}
 ```
 
 Se a SEFAZ estiver fora (`erro: sem_comunicacao`), o PDV pede de novo com `"tp_emis": "9"`:

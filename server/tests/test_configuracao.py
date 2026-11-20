@@ -16,8 +16,13 @@ def api(api_local):
 
 
 A1 = {"pfx_base64": base64.b64encode(_pfx()).decode(), "senha": SENHA}
-EMITENTE = {"cnpj": "11.222.333/0001-81", "uf": "RJ", "ambiente": "2", "modelo": "65",
-            "certificado": A1, "csc": {"id": "1", "token": "CSC-SECRETO"}}
+# Só os segredos se gravam; UF, ambiente e modelo vêm em cada chamada.
+EMITENTE = {"cnpj": "11.222.333/0001-81", "certificado": A1, "csc": {"id": "1", "token": "CSC-SECRETO"}}
+DADOS = {"uf": "RJ", "ambiente": "2", "modelo": "65"}
+
+
+def _emitir(cliente, **extra):
+    return cliente.post("/v1/nfe/emitir", json={**DADOS, "ini": INI.format(tp=1), **extra})
 
 
 class MotorFalso:
@@ -47,16 +52,24 @@ def _gravar(api, **extra):
 
 
 # ── o emitente guardado ───────────────────────────────────────────────────────
-def test_emitente_guardado_dispensa_os_dados_na_chamada(api):
+def test_emitente_guardado_dispensa_o_cnpj_na_chamada(api):
     _gravar(api, certificado=None)
-    corpo = api.post("/v1/nfe/emitir", json={"ini": INI.format(tp=1)}).json()
+    corpo = _emitir(api).json()
     assert corpo["situacao"] == "autorizada"
-    assert corpo["chave"][:2] == "33" and corpo["chave"][6:20] == CNPJ  # RJ e o CNPJ guardados
+    assert corpo["chave"][:2] == "33" and corpo["chave"][6:20] == CNPJ  # a UF da chamada e o CNPJ guardado
+
+
+@pytest.mark.parametrize("campo", ["uf", "ambiente", "modelo"])
+def test_dados_da_emissao_vem_na_chamada_e_nao_do_cofre(api, campo):
+    _gravar(api, certificado=None)
+    sem = {chave: valor for chave, valor in DADOS.items() if chave != campo}
+    resposta = api.post("/v1/nfe/emitir", json={**sem, "ini": INI.format(tp=1)})
+    assert resposta.json()["motivo"] == "dados_do_emitente_ausentes" and campo in resposta.json()["mensagem"]
 
 
 def test_certificado_e_csc_guardados_chegam_na_lib(api, motor_real):
     _gravar(api)
-    assert api.post("/v1/status-servico", json={}).status_code == 200
+    assert api.post("/v1/status-servico", json=DADOS).status_code == 200
     assert motor_real.pedido.certificado.pfx_base64 == A1["pfx_base64"]
     assert motor_real.pedido.csc.token == "CSC-SECRETO" and motor_real.pedido.uf == "RJ"
 
@@ -64,7 +77,7 @@ def test_certificado_e_csc_guardados_chegam_na_lib(api, motor_real):
 def test_o_que_vem_na_chamada_vale_sobre_o_guardado(api, motor_real):
     _gravar(api)
     outro = {"pfx_base64": base64.b64encode(_pfx()).decode(), "senha": SENHA}
-    api.post("/v1/status-servico", json={"cnpj": CNPJ, "uf": "SP", "ambiente": "1", "certificado": outro})
+    api.post("/v1/status-servico", json={**DADOS, "cnpj": CNPJ, "uf": "SP", "ambiente": "1", "certificado": outro})
     pedido = motor_real.pedido
     assert pedido.certificado.pfx_base64 == outro["pfx_base64"]
     assert pedido.uf == "SP" and pedido.ambiente == "1" and pedido.csc.token == "CSC-SECRETO"
@@ -72,9 +85,15 @@ def test_o_que_vem_na_chamada_vale_sobre_o_guardado(api, motor_real):
 
 def test_gravar_sem_certificado_mantem_o_anterior(api, motor_real):
     _gravar(api)
-    _gravar(api, certificado=None, uf="SP")
-    api.post("/v1/status-servico", json={})
-    assert motor_real.pedido.certificado.pfx_base64 == A1["pfx_base64"] and motor_real.pedido.uf == "SP"
+    _gravar(api, certificado=None, csc={"id": "2", "token": "OUTRO-CSC"})
+    api.post("/v1/status-servico", json=DADOS)
+    assert motor_real.pedido.certificado.pfx_base64 == A1["pfx_base64"] and motor_real.pedido.csc.id == "2"
+
+
+def test_so_os_segredos_ficam_guardados(api):
+    """Um desktop/versão anterior mandando UF e ambiente: não se gravam nem aparecem."""
+    emitente = _gravar(api, uf="SP", ambiente="1", modelo="55", fuso="-03:00")["emitentes"][0]
+    assert set(emitente) == {"cnpj", "certificado", "csc"}
 
 
 @pytest.mark.parametrize("certificado,motivo", [
@@ -109,8 +128,7 @@ def test_no_disco_nada_fica_em_claro(api, tmp_path):
 def test_trocar_a_chave_do_cofre_deixa_a_configuracao_ilegivel(api, monkeypatch):
     _gravar(api)
     monkeypatch.setenv("ACBR_CHAVE_COFRE", base64.b64encode(b"n" * 32).decode())
-    resposta = api.post("/v1/nfe/emitir", json={"ini": INI.format(tp=1)})
-    assert resposta.json()["motivo"] == "configuracao_ilegivel"
+    assert _emitir(api).json()["motivo"] == "configuracao_ilegivel"
 
 
 def test_cofre_gravado_com_a_chave_e2e_antiga_continua_abrindo(api, monkeypatch):
@@ -120,7 +138,7 @@ def test_cofre_gravado_com_a_chave_e2e_antiga_continua_abrindo(api, monkeypatch)
     _gravar(api, certificado=None)
     monkeypatch.delenv("ACBR_E2E_KEY")
     monkeypatch.setenv("ACBR_CHAVE_COFRE", CHAVE_COFRE)
-    assert api.post("/v1/nfe/emitir", json={"ini": INI.format(tp=1)}).json()["situacao"] == "autorizada"
+    assert _emitir(api).json()["situacao"] == "autorizada"
 
 
 def test_sem_chave_do_cofre_explica(api, monkeypatch):
@@ -130,16 +148,15 @@ def test_sem_chave_do_cofre_explica(api, monkeypatch):
 
 
 def test_sem_emitente_nenhum_explica(api):
-    resposta = api.post("/v1/nfe/emitir", json={"ini": INI.format(tp=1)})
+    resposta = _emitir(api)
     assert resposta.json()["erro"] == "configuracao" and resposta.json()["motivo"] == "emitente_nao_configurado"
 
 
 def test_com_dois_emitentes_a_chamada_diz_qual(api):
     _gravar(api, certificado=None)
     _gravar(api, certificado=None, cnpj="11222333000262")
-    resposta = api.post("/v1/nfe/emitir", json={"ini": INI.format(tp=1)})
-    assert resposta.json()["motivo"] == "emitente_nao_informado"
-    corpo = api.post("/v1/nfe/emitir", json={"cnpj": "11222333000262", "ini": INI.format(tp=1)}).json()
+    assert _emitir(api).json()["motivo"] == "emitente_nao_informado"
+    corpo = _emitir(api, cnpj="11222333000262").json()
     assert corpo["chave"][6:20] == "11222333000262"
 
 
@@ -163,7 +180,7 @@ def test_pdv_da_rede_emite_mas_nao_reconfigura(api, rota, corpo):
     _gravar(api, certificado=None)
     da_rede = cliente_local(("192.168.0.20", 50000))
     assert da_rede.post(rota, json=corpo).status_code == 403
-    assert da_rede.post("/v1/nfe/emitir", json={"ini": INI.format(tp=1)}).json()["situacao"] == "autorizada"
+    assert _emitir(da_rede).json()["situacao"] == "autorizada"
 
 
 def test_redes_de_configuracao_liberam_o_docker_local(api, monkeypatch):
@@ -174,7 +191,7 @@ def test_redes_de_configuracao_liberam_o_docker_local(api, monkeypatch):
 
 def test_local_fala_json_comum_sem_cifra(api):
     _gravar(api, certificado=None)
-    resposta = api.post("/v1/nfe/emitir", json={"ini": INI.format(tp=1)})
+    resposta = _emitir(api)
     assert resposta.json()["situacao"] == "autorizada" and "dados" not in resposta.json()
 
 
@@ -263,7 +280,7 @@ def test_campos_fora_do_contrato_sao_recusados(api, rota, corpo):
 
 
 def test_ini_malformado_no_simulador_e_documento_invalido(api):
-    resposta = api.post("/v1/nfe/emitir", json={"uf": "SP", "cnpj": CNPJ, "ini": "[Identificacao]\nnNF=1\n"})
+    resposta = api.post("/v1/nfe/emitir", json={**DADOS, "cnpj": CNPJ, "ini": "[Identificacao]\nnNF=1\n"})
     assert resposta.status_code == 422 and resposta.json()["motivo"] == "ini_invalido"
 
 
@@ -282,7 +299,7 @@ def test_falha_inesperada_vira_incerto_cifrado(api, monkeypatch):
             raise KeyError("algo")
 
     monkeypatch.setattr(app.main, "motor", Quebrado())
-    resposta = api.post("/v1/status-servico", json={"uf": "SP", "cnpj": CNPJ})  # ClienteSelado abre a resposta
+    resposta = api.post("/v1/status-servico", json={**DADOS, "cnpj": CNPJ})  # ClienteSelado abre a resposta
     assert resposta.status_code == 500
     assert resposta.json()["erro"] == "incerto" and resposta.json()["motivo"] == "falha_interna"
 

@@ -18,8 +18,8 @@ Cada rota, campo, resposta e erro está na [referência da API](API.md); instala
 | | Comunicador na **nuvem** (Docker, `ACBR_MODO=nuvem`) | Comunicador **local** (desktop, serviço Windows) |
 |---|---|---|
 | O cliente guarda | o token, a `ACBR_E2E_KEY`, e o certificado A1 + senha + CSC de cada emitente | só o token |
-| Cada chamada leva | `Authorization: Bearer`, corpo cifrado, o contexto inteiro (`cnpj`, `uf`, `ambiente`, `modelo`, `certificado`, `csc`) e o documento | `Authorization: Bearer` e o documento, em JSON comum |
-| O emitente é configurado | pelo cliente, que o manda em toda chamada | na tela **Emitente** do desktop, nesta máquina |
+| Cada chamada leva | `Authorization: Bearer`, corpo cifrado, o contexto inteiro (`cnpj`, `uf`, `ambiente`, `modelo`, `certificado`, `csc`) e o documento | `Authorization: Bearer`, os dados da emissão (`uf`, `ambiente`, `modelo`, `fuso`; `cnpj` se houver mais de um emitente) e o documento, em JSON comum |
+| Os segredos (A1, senha, CSC) | ficam com o cliente, que os manda em toda chamada | ficam no comunicador, gravados na tela **Emitente** do desktop, nesta máquina |
 | Endereço | `https://` atrás de um proxy | `http://127.0.0.1:8030` (ou o IP do PC, na rede da loja) |
 
 **Nuvem, exemplo** (o JSON abaixo é o texto claro que vai cifrado no envelope):
@@ -41,7 +41,7 @@ obrigação do cliente**.
 ```bash
 curl -X POST http://127.0.0.1:8030/v1/nfe/emitir \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"ini": "[Identificacao]…"}'
+  -d '{"uf": "SP", "ambiente": "1", "modelo": "65", "fuso": "-03:00", "ini": "[Identificacao]…"}'
 ```
 
 ## Quem guarda o quê
@@ -50,9 +50,10 @@ O comunicador **não tem fila nem banco de notas**. A nota pendente, o XML assin
 contingência e o número da série moram no cliente. Se o comunicador reiniciar no meio,
 nada se perde: o cliente tem tudo para consultar ou transmitir de novo.
 
-Na nuvem, o comunicador não guarda nada do emitente nem das notas. No local, guarda a
-configuração do emitente (certificado, CSC, UF, ambiente), gravada pelo desktop, e
-nenhum XML; o que vier na chamada ainda vale sobre o guardado.
+Na nuvem, o comunicador não guarda nada do emitente nem das notas. No local, guarda só
+os segredos do emitente (certificado A1, senha e CSC), gravados pelo desktop, e nenhum
+XML. Os dados da emissão (UF, ambiente, modelo, fuso; regime, CST e IBS/CBS no INI) vêm
+sempre na chamada; certificado e CSC vindos na chamada valem sobre os guardados.
 
 ## O resultado
 
@@ -175,7 +176,7 @@ Detalhes que já custaram nota recusada:
   é Debian 12 (2.36). Alpine não serve.
 - **Fuso do `dhEmi` (rejeição 704).** O INI leva a data sem fuso e a ACBrLib acrescenta o
   do sistema — UTC num container. O comunicador grava `TimeZone.Modo=2` e
-  `TimeZone.Str` a cada nota, com o `fuso` do contexto (ou do emitente guardado).
+  `TimeZone.Str` a cada nota, com o `fuso` da chamada.
 - **Compilar a lib.** `export ACBR_HOME=<fontes>` antes do `lazbuild --build-all
   --build-mode=Linux-x86_64-MT --ws=nogui Projetos/ACBrLib/Fontes/NFe/ACBrLibNFeConsoleMT.lpi`
   — sem o `ACBR_HOME` o projeto não acha `ACBr.inc`.
@@ -204,7 +205,7 @@ O INI segue o leiaute da ACBrLib NFe. Algumas recusas comuns:
 
 ## Homologação e produção
 
-O ambiente vai na chamada (nuvem) ou no emitente guardado (local): `"2"` homologação, `"1"` produção. Ao passar
+O ambiente vai na chamada, nos dois modos: `"2"` homologação, `"1"` produção. Ao passar
 para produção, troque também o **CSC** pelo de produção e confira o **próximo número** da
 série: notas de teste não ocupam números de produção, mas um buraco na série exige
 inutilização na SEFAZ.

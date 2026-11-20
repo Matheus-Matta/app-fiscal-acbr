@@ -1,8 +1,9 @@
 """O contrato com o cliente (server/README.md, "Operações").
 
-Quem emite, onde e com qual certificado chega em toda chamada no modo nuvem, e
-fica guardado no comunicador no modo local (`configuracao.py`, o que o desktop
-grava). No local, o que vier na chamada vale sobre o guardado (`modo.py`).
+Os dados da emissão (CNPJ, UF, ambiente, modelo, fuso; regime e CST vão no INI)
+chegam em toda chamada, nos dois modos. No modo local, só os segredos do emitente
+(certificado A1 + senha e CSC) ficam guardados no comunicador (`configuracao.py`, o
+que o desktop grava); na nuvem eles também vêm na chamada.
 """
 import re
 from typing import Literal
@@ -38,7 +39,8 @@ class Contexto(BaseModel):
     referencia: str = ""
     modelo: Modelo = "65"
     ambiente: Ambiente = "2"
-    # Vazios: valem os do emitente guardado (`configuracao.completar`).
+    # Vazios: recusados na emissão (`main._dados_da_chamada`); no local, sem cnpj
+    # vale o único emitente guardado.
     uf: UF | Literal[""] = ""
     cnpj: str = Field(default="", pattern=r"^$|" + PADRAO_CNPJ)
     # O fuso do dhEmi ("-03:00"). Vazio = vale o do sistema.
@@ -71,13 +73,12 @@ class Cancelar(Contexto):
 
 # ── configuração guardada ────────────────────────────────────────────────────
 class Emitente(BaseModel):
-    """O que o desktop/painel grava. `certificado`/`csc` ausentes = mantém o guardado."""
+    """O que o desktop grava: só os segredos, pelo CNPJ. `certificado`/`csc` ausentes = mantém o guardado.
+
+    UF, ambiente, modelo e fuso não se gravam: vêm em cada chamada.
+    """
 
     cnpj: str = Field(pattern=PADRAO_CNPJ)
-    uf: UF
-    ambiente: Ambiente = "2"
-    modelo: Modelo = "65"
-    fuso: str = Field(default="", pattern=PADRAO_FUSO)
     certificado: Certificado | None = None
     csc: Csc | None = None
 

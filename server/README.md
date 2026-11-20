@@ -9,7 +9,7 @@ em um de dois modos (`ACBR_MODO`):
 | Para quê | Docker num servidor da internet, falado só por API | O comunicador na máquina da loja |
 | Autenticação | `Authorization: Bearer <token>` | `Authorization: Bearer <token>` |
 | Corpo | Cifrado de ponta a ponta com a `ACBR_E2E_KEY` (o PDV tem a mesma) | JSON comum |
-| Emitente (CNPJ, UF, A1, CSC) | Vem **em toda chamada**. Nunca é gravado | Guardado no comunicador, cifrado. O PDV manda só o documento |
+| Emitente (CNPJ, UF, A1, CSC) | Vem **em toda chamada**. Nunca é gravado | A1 e CSC guardados no comunicador, cifrados. O PDV manda UF, ambiente, modelo e o documento |
 | `/v1/config/emitente`, `/token` | Não existem | Só atendem a própria máquina |
 | XML das notas | Só na resposta; nada fica no disco | Só na resposta; nada fica no disco |
 | Defesas extras | Não sobe com token fraco; bloqueio por tentativas | Configuração só da própria máquina |
@@ -117,11 +117,12 @@ certificado e o CSC sempre que a lib precisar deles. Faltou algum dos quatro:
 `configuracao`, motivo `dados_do_emitente_ausentes`. Nada disso é gravado: o certificado só passa pela
 memória da lib, que o esquece ao fim da chamada.
 
-**No local**, com o emitente guardado, a chamada pode trazer só o documento
-(`{"ini": "..."}`). Sem `cnpj`, vale o único emitente cadastrado; com mais de um, informe
-o `cnpj`. Campo que vem na chamada vale sobre o guardado; certificado e CSC vazios na
-chamada = os guardados. Sem emitente e sem dados na chamada: `configuracao`, motivo
-`emitente_nao_configurado`.
+**No local**, só os segredos ficam guardados (certificado A1 + senha e CSC, pelo CNPJ). A
+chamada traz o resto: `uf`, `ambiente` e `modelo` sempre (faltou algum: `configuracao`,
+motivo `dados_do_emitente_ausentes`), o `fuso`, e no INI o regime, CST e IBS/CBS. Sem
+`cnpj`, vale o único emitente cadastrado; com mais de um, informe o `cnpj`. Certificado e
+CSC vazios na chamada = os guardados. Sem emitente e sem certificado na chamada:
+`configuracao`, motivo `emitente_nao_configurado`.
 
 O certificado é conferido antes de chegar à lib. A recusa vem como `erro: configuracao`,
 nunca como contingência, com `motivo`: `certificado_ausente`, `senha_invalida`,
@@ -136,7 +137,7 @@ para a filial (mesma raiz de 8 posições).
 |---|---|---|---|
 | `/v1/config/ler` | os dois | `{}` | `modo`, `motor` e o estado da lib. No local, também os emitentes **sem segredo** (titular e validade do A1, se há CSC) e a origem do token |
 | `/v1/config/lib` | os dois | `url`, `sha256` (vazios: o pacote configurado) | baixa, confere e instala a ACBrLib, sem reiniciar. Com a lib já carregada: `lib_ja_carregada` |
-| `/v1/config/emitente` | local | `cnpj`, `uf`, `ambiente`, `modelo`, `fuso`, `certificado`, `csc` | o mesmo de `ler` |
+| `/v1/config/emitente` | local | `cnpj`, `certificado`, `csc` (só os segredos; UF, ambiente, modelo e fuso vêm na emissão) | o mesmo de `ler` |
 | `/v1/config/emitente/remover` | local | `cnpj` | o mesmo de `ler` |
 | `/v1/config/token` | local | `token` (vazio: gera um) | `{"token": "..."}` — a única vez que ele aparece |
 
@@ -181,7 +182,7 @@ O `motivo` de cada `erro` diz a providência. Os que não vêm da SEFAZ nem do c
 | `sem_comunicacao` | `comunicador_ocupado` | outra nota ocupou a lib por mais de `ACBR_ESPERA_TRAVA`; nada foi enviado |
 | `incerto` | `sefaz_sem_resposta` | a conexão caiu depois do envio: consulte antes de reenviar |
 | `incerto` | `falha_interna` | erro inesperado no comunicador (detalhe no log) |
-| `configuracao` | `dados_do_emitente_ausentes` | nuvem: a chamada não trouxe `cnpj`, `uf`, `ambiente` ou `modelo` |
+| `configuracao` | `dados_do_emitente_ausentes` | a chamada não trouxe `uf`, `ambiente` ou `modelo` (na nuvem, também o `cnpj`) |
 | `configuracao` | `emitente_nao_configurado`, `emitente_nao_informado`, `configuracao_ilegivel`, `cofre_sem_chave` | local: ver "Configuração pela API" |
 | `documento_invalido` | `campos_invalidos` | campo fora do contrato, ou JSON quebrado (só o nome do campo volta) |
 | `sigilo` | `cifra_no_modo_local` | local: chegou um envelope cifrado (PDV configurado para a nuvem ou de versão anterior). Nada foi executado: mande JSON comum |

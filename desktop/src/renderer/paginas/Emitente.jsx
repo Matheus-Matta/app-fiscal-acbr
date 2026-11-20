@@ -1,27 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, Aviso, Campo, Cartao, formatarCnpj, formatarData, mensagemDe } from '../comum';
 
-const UFS = ['AC', 'AL', 'AM', 'AP', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MG', 'MS', 'MT', 'PA', 'PB', 'PE', 'PI',
-  'PR', 'RJ', 'RN', 'RO', 'RR', 'RS', 'SC', 'SE', 'SP', 'TO'];
-const FUSOS = [
-  ['', 'O do computador'],
-  ['-02:00', '-02:00 (Fernando de Noronha)'],
-  ['-03:00', '-03:00 (Brasília)'],
-  ['-04:00', '-04:00 (Amazonas, MT, MS, RO, RR)'],
-  ['-05:00', '-05:00 (Acre)'],
-];
-
-const VAZIO = { cnpj: '', uf: 'SP', ambiente: '2', modelo: '65', fuso: '-03:00', senha: '', cscId: '', cscToken: '' };
+// Só os segredos se configuram aqui. UF, ambiente, modelo, fuso, regime e CST vêm
+// do PDV em cada emissão.
+const VAZIO = { cnpj: '', senha: '', cscId: '', cscToken: '' };
 
 function formDe(emitente) {
   if (!emitente) return { ...VAZIO };
   return {
     ...VAZIO,
     cnpj: formatarCnpj(emitente.cnpj),
-    uf: emitente.uf,
-    ambiente: emitente.ambiente,
-    modelo: emitente.modelo,
-    fuso: emitente.fuso,
     cscId: emitente.csc.id,
   };
 }
@@ -95,16 +83,8 @@ export default function Emitente({ estado }) {
       setRetorno({ tipo: 'erro', texto: 'Ao trocar o ID do CSC, informe também o código (token) do CSC.' });
       return;
     }
-    if (form.ambiente === '1' && atual?.ambiente !== '1' &&
-        !window.confirm('Produção: as notas terão valor fiscal. Confirmar a mudança para PRODUÇÃO?')) {
-      return;
-    }
     const dados = {
       cnpj: form.cnpj,
-      uf: form.uf,
-      ambiente: form.ambiente,
-      modelo: form.modelo,
-      fuso: form.fuso,
       // null = mantém o que já está guardado
       certificado: arquivo ? { pfx_base64: arquivo.pfx_base64, senha: form.senha } : null,
       csc: form.cscToken ? { id: form.cscId, token: form.cscToken } : null,
@@ -118,7 +98,7 @@ export default function Emitente({ estado }) {
     }
     const cnpj = form.cnpj.toUpperCase().replace(/[^0-9A-Z]/g, '');
     aplicar(resposta.corpo, cnpj);
-    setRetorno({ tipo: 'ok', texto: 'Emitente gravado. O PDV já pode emitir enviando só o documento.' });
+    setRetorno({ tipo: 'ok', texto: 'Emitente gravado. O PDV emite enviando o documento e os dados da emissão (UF, ambiente, modelo).' });
   };
 
   const remover = async () => {
@@ -163,8 +143,9 @@ export default function Emitente({ estado }) {
     <>
       <h1>Emitente</h1>
       <p className="introducao">
-        Os dados fiscais ficam guardados e cifrados no comunicador. Com eles, o PDV emite enviando só o documento —
-        e, sem internet, a nota sai em contingência offline aqui mesmo.
+        Aqui ficam só os segredos do emitente — certificado A1, senha e CSC —, guardados e cifrados no comunicador.
+        UF, ambiente, modelo, fuso, regime e CST vêm do PDV em cada emissão. Sem internet, a nota sai em contingência
+        offline aqui mesmo.
       </p>
 
       {config.emitentes.length > 0 && (
@@ -191,33 +172,10 @@ export default function Emitente({ estado }) {
       <form onSubmit={salvar}>
         <Cartao titulo="Empresa">
           <div className="grade">
-            <Campo rotulo="CNPJ">
+            <Campo rotulo="CNPJ" ajuda="Identifica de quem são o certificado e o CSC.">
               <input value={form.cnpj} onChange={mudar('cnpj')} required disabled={editando} placeholder="00.000.000/0000-00" />
             </Campo>
-            <Campo rotulo="UF">
-              <select value={form.uf} onChange={mudar('uf')}>
-                {UFS.map((uf) => <option key={uf}>{uf}</option>)}
-              </select>
-            </Campo>
-            <Campo rotulo="Documento">
-              <select value={form.modelo} onChange={mudar('modelo')}>
-                <option value="65">NFC-e (modelo 65)</option>
-                <option value="55">NF-e (modelo 55)</option>
-              </select>
-            </Campo>
-            <Campo rotulo="Ambiente">
-              <select value={form.ambiente} onChange={mudar('ambiente')}>
-                <option value="2">Homologação (testes)</option>
-                <option value="1">Produção</option>
-              </select>
-            </Campo>
-            <Campo rotulo="Fuso da emissão" ajuda="Vai no horário da nota (dhEmi).">
-              <select value={form.fuso} onChange={mudar('fuso')}>
-                {FUSOS.map(([valor, texto]) => <option key={valor} value={valor}>{texto}</option>)}
-              </select>
-            </Campo>
           </div>
-          {form.ambiente === '1' && <Aviso tipo="alerta">Produção: as notas emitidas têm valor fiscal.</Aviso>}
         </Cartao>
 
         <Cartao titulo="Certificado digital A1">
@@ -238,7 +196,7 @@ export default function Emitente({ estado }) {
         <Cartao titulo="CSC (código de segurança do contribuinte)">
           <p className="nota">Obrigatório na NFC-e: gerado no portal da SEFAZ da sua UF. Vai no QR Code do cupom.</p>
           {editando && (
-            <Aviso tipo={atual.csc.configurado ? 'ok' : form.modelo === '65' ? 'alerta' : 'info'}>
+            <Aviso tipo={atual.csc.configurado ? 'ok' : 'alerta'}>
               {atual.csc.configurado ? `CSC guardado (ID ${atual.csc.id}).` : 'Nenhum CSC guardado.'}
             </Aviso>
           )}
