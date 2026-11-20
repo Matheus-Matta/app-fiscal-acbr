@@ -2,7 +2,7 @@ name: Imagem
 
 # Publica a imagem do comunicador em ghcr.io/<dono>/comunicador-fiscal.
 #
-# * tag vX.Y.Z: publica `X.Y.Z`, `X.Y` e `latest`;
+# * chamado pelo release.yml (tag vX.Y.Z): publica `X.Y.Z`, `X.Y` e `latest` (sempre a última);
 # * botão "Run workflow": publica `manual` e `sha-<commit>`, sem mexer no `latest`.
 #
 # Só Linux (linux/amd64). A ACBrLib vem do repositório (server/embutida, licenças em
@@ -10,8 +10,16 @@ name: Imagem
 # nada. Antes de publicar, a imagem sobe e o /health tem de dizer `lib: true`.
 on:
   workflow_dispatch:
-  push:
-    tags: ["v*.*.*"]
+  workflow_call:
+    inputs:
+      versao:
+        description: "Versão da imagem (1.2.0): publica 1.2.0, 1.2 e latest."
+        type: string
+        required: true
+      ref:
+        description: "O que gerar (refs/tags/v1.2.0)."
+        type: string
+        default: ""
 
 jobs:
   testes:
@@ -21,6 +29,8 @@ jobs:
         working-directory: server
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -36,6 +46,8 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
 
       - uses: docker/setup-buildx-action@v3
 
@@ -53,10 +65,10 @@ jobs:
             latest=false
           tags: |
             type=sha,format=short
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
-            type=raw,value=manual,enable=${{ github.event_name == 'workflow_dispatch' }}
+            type=semver,pattern={{version}},value=v${{ inputs.versao }},enable=${{ inputs.versao != '' }}
+            type=semver,pattern={{major}}.{{minor}},value=v${{ inputs.versao }},enable=${{ inputs.versao != '' }}
+            type=raw,value=latest,enable=${{ inputs.versao != '' }}
+            type=raw,value=manual,enable=${{ inputs.versao == '' }}
 
       - name: A imagem sobe e carrega a ACBrLib
         uses: docker/build-push-action@v6

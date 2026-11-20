@@ -1,0 +1,136 @@
+name: Release
+
+# Uma versão nova do Comunicador Fiscal, de ponta a ponta, a partir da tag vX.Y.Z:
+#
+#   1. a versão sai da tag (v1.2.0 → 1.2.0) e vai para tudo o que é gerado;
+#   2. desktop Windows (.exe) e Linux (AppImage), testados antes de empacotar (desktop.yml);
+#   3. imagem Docker Linux em ghcr.io, testada antes de publicar: `1.2.0`, `1.2` e `latest` (imagem.yml);
+#   4. o Release v1.2.0 com os dois arquivos e o SHA256SUMS.txt, SEMPRE marcado como Latest.
+#
+# Dois jeitos de disparar:
+#
+#   * git tag v1.2.0 && git push origin v1.2.0
+#   * Actions → Release → Run workflow, com a versão (1.2.0): a tag é criada no commit
+#     escolhido e o resto segue aqui mesmo. (Uma tag criada por workflow com o
+#     GITHUB_TOKEN não dispara outros workflows: por isso tudo acontece neste.)
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      versao:
+        description: "Versão nova (ex.: 1.2.0). A tag v1.2.0 é criada no commit do branch escolhido."
+        required: true
+        type: string
+
+# Duas execuções da mesma versão nunca correm juntas.
+concurrency:
+  group: release-${{ inputs.versao || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  versao:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # criar a tag, no botão
+    outputs:
+      versao: ${{ steps.versao.outputs.versao }}
+      tag: ${{ steps.versao.outputs.tag }}
+      imagem: ${{ steps.versao.outputs.imagem }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: versao
+        env:
+          PEDIDA: ${{ inputs.versao }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then bruta="$PEDIDA"; else bruta="$GITHUB_REF_NAME"; fi
+          versao="${bruta#v}"
+          # Só X.Y.Z: é o que vira o Latest e as tags da imagem (1.2.0, 1.2).
+          if ! [[ "$versao" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Versão '$bruta' inválida: use X.Y.Z (ex.: 1.2.0)."
+            exit 1
+          fi
+          tag="v$versao"
+          echo "versao=$versao" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "imagem=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/comunicador-fiscal" >> "$GITHUB_OUTPUT"
+          echo "Versão $versao (tag $tag)"
+
+      - name: Criar a tag (botão)
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          TAG: ${{ steps.versao.outputs.tag }}
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" > /dev/null; then
+            echo "::error::A tag $TAG já existe. Use outra versão (ou rode pelo push da tag)."
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Versão ${TAG#v}"
+          git push origin "$TAG"
+
+  desktop:
+    needs: versao
+    permissions:
+      contents: read
+    uses: ./.github/workflows/desktop.yml
+    with:
+      versao: ${{ needs.versao.outputs.versao }}
+      ref: refs/tags/${{ needs.versao.outputs.tag }}
+
+  imagem:
+    needs: versao
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/imagem.yml
+    with:
+      versao: ${{ needs.versao.outputs.versao }}
+      ref: refs/tags/${{ needs.versao.outputs.tag }}
+
+  publicar:
+    needs: [versao, desktop, imagem]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: desktop-*
+          path: arquivos
+          merge-multiple: true
+
+      - run: ls -la arquivos && (cd arquivos && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt)
+
+      - name: Notas da versão
+        env:
+          VERSAO: ${{ needs.versao.outputs.versao }}
+          IMAGEM: ${{ needs.versao.outputs.imagem }}
+        run: |
+          cat > notas.md <<EOF
+          ## Comunicador Fiscal $VERSAO
+
+          | | |
+          |---|---|
+          | **Desktop Windows** (x64, portátil) | \`ComunicadorFiscal-$VERSAO.exe\` |
+          | **Desktop Linux** (x64, AppImage) | \`ComunicadorFiscal-$VERSAO-x86_64.AppImage\` |
+          | **Docker** (Linux, nuvem ou loja) | \`docker pull $IMAGEM:$VERSAO\` |
+
+          A ACBrLib vai dentro de cada um. Confira os arquivos com o \`SHA256SUMS.txt\`.
+          Como instalar: [docs/USO.md](https://github.com/$GITHUB_REPOSITORY/blob/v$VERSAO/docs/USO.md).
+          EOF
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.versao.outputs.tag }}
+          name: Comunicador Fiscal ${{ needs.versao.outputs.versao }}
+          body_path: notas.md
+          generate_release_notes: true   # o que mudou desde a versão anterior, depois das notas
+          files: arquivos/*
+          make_latest: "true"            # a última versão publicada é sempre a Latest
+          draft: false
+          prerelease: false

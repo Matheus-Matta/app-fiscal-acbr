@@ -13,10 +13,20 @@ A ACBrLib (Linux e Windows) vem neste repositório, com as licenças em
 | GitHub Actions | O que gera |
 |---|---|
 | [`ci.yml`](.github/workflows/ci.yml) | testes do servidor e do desktop; a imagem sobe com a lib |
-| [`imagem.yml`](.github/workflows/imagem.yml) | imagem Docker **Linux** (`linux/amd64`) em `ghcr.io/<dono>/comunicador-fiscal` |
-| [`desktop.yml`](.github/workflows/desktop.yml) | desktop **Windows** (`.exe`) e **Linux** (AppImage), no Release da tag |
+| [`release.yml`](.github/workflows/release.yml) | **uma versão nova**, pela tag `vX.Y.Z`: chama os dois abaixo com a versão da tag e cria o Release, sempre como **Latest** |
+| [`desktop.yml`](.github/workflows/desktop.yml) | desktop **Windows** (`.exe`) e **Linux** (AppImage) |
+| [`imagem.yml`](.github/workflows/imagem.yml) | imagem Docker **Linux** (`linux/amd64`) em `ghcr.io/<dono>/comunicador-fiscal`: `X.Y.Z`, `X.Y` e `latest` |
 
-Uma tag `vX.Y.Z` dispara a imagem e o desktop juntos.
+### Lançar uma versão
+
+```bash
+git tag v1.2.0 && git push origin v1.2.0
+```
+
+ou, no GitHub, **Actions → Release → Run workflow** com a versão (`1.2.0`): a tag é criada
+sozinha. Os dois geram o desktop (Windows e Linux) e a imagem Docker com essa versão, testam
+cada um e publicam o Release `v1.2.0` com os arquivos e o `SHA256SUMS.txt`, marcado como
+**Latest**.
 
 ## Documentação
 

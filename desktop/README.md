@@ -22,8 +22,9 @@ carrega, mas a assinatura falha) e se reabre com ele. A assinatura foi conferida
 libxml2 `.so.2` (Ubuntu 22.04/24.04, Debian 12) quanto com a `.so.16` (Ubuntu 26.04).
 No GNOME, o ícone da bandeja precisa da extensão AppIndicator.
 
-Os dois são gerados pelo GitHub Actions ([`desktop.yml`](../.github/workflows/desktop.yml)): numa
-tag `vX.Y.Z` eles vão para o Release, com o `SHA256SUMS.txt`.
+Os dois são gerados pelo GitHub Actions ([`desktop.yml`](../.github/workflows/desktop.yml)); numa
+versão nova (tag `vX.Y.Z`, pelo [`release.yml`](../.github/workflows/release.yml)), com a versão da tag
+no nome, vão para o Release, com o `SHA256SUMS.txt`.
 
 - **Fechar a janela não encerra**: o comunicador continua no ícone da bandeja. Para encerrar,
   use "Sair" no menu da bandeja.
