@@ -72,6 +72,92 @@ def test_fora_do_envio_falha_de_rede_continua_sem_comunicacao():
     assert isinstance(_classificar("Erro HTTP: 500"), sefaz.FalhaDeComunicacao)
 
 
+#: Mensagem real da ACBrLib (NCM com um dígito), com o "http" do namespace no meio.
+ERRO_DE_SCHEMA = ("Falha na validação dos dados da nota: 8\r\n\r\n --> 1839 - Element "
+                  "'{http://www.portalfiscal.inf.br/nfe}NCM': [facet 'pattern'] The value '1' is not accepted "
+                  "by the pattern '[0-9]{2}|[0-9]{8}'.\n")
+
+
+@pytest.mark.parametrize("enviando", [False, True])
+@pytest.mark.parametrize("mensagem", [
+    ERRO_DE_SCHEMA,
+    ERRO_DE_SCHEMA.replace("ç", "�").replace("ã", "�"),  # a lib nem sempre responde em UTF-8
+    "Falha na validação dos dados da nota: 8",
+    "Element '{http://www.portalfiscal.inf.br/nfe}xProd': [facet 'maxLength'] The value 'Senha do certificado'",
+])
+def test_erro_de_schema_e_do_documento_e_nunca_falta_de_rede(mensagem, enviando):
+    assert isinstance(_classificar(mensagem, enviando=enviando), sefaz.DocumentoInvalido)
+
+
+class LibQueFalha:
+    """Tudo dá certo, menos a etapa `falha`, que deixa `mensagem` no último retorno."""
+
+    def __init__(self, falha, mensagem):
+        self.falha, self.mensagem, self.chamadas = falha, mensagem, []
+
+    def __getattr__(self, nome):
+        def chamada(*_args):
+            self.chamadas.append(nome)
+            return -10 if nome == self.falha else 0
+        return chamada
+
+    def NFE_UltimoRetorno(self, _handle, buffer, tamanho):
+        buffer.value = self.mensagem.encode()
+        tamanho._obj.value = len(buffer.value)
+        return 0
+
+
+def _pedido(**campos):
+    from types import SimpleNamespace as N
+
+    return N(uf="RJ", ambiente="2", modelo="65", fuso="-03:00", cnpj="11222333000181", ini="[infNFe]", xml="<NFe/>",
+             certificado=N(pfx_base64="", senha=""), csc=N(id="1", token=""), **{"tp_emis": "1", **campos})
+
+
+@pytest.mark.parametrize("etapa", ["NFE_CarregarINI", "NFE_Assinar", "NFE_Validar"])
+@pytest.mark.parametrize("mensagem", [
+    ERRO_DE_SCHEMA, "XmlNode não pode ser nulo.", "Erro HTTP qualquer", "timeout", "algo que ninguém previu",
+])
+def test_antes_do_envio_a_falha_nunca_e_de_rede_nem_incerta(etapa, mensagem):
+    lib = LibQueFalha(etapa, mensagem)
+    with pytest.raises(sefaz.DocumentoInvalido):
+        _motor_com(lib).emitir(_pedido())
+    assert "NFE_Enviar" not in lib.chamadas
+
+
+def test_certificado_que_falha_ao_assinar_continua_configuracao():
+    with pytest.raises(sefaz.FalhaDeConfiguracao) as erro:
+        _motor_com(LibQueFalha("NFE_Assinar", "Certificado vencido em 01/01/2026")).emitir(_pedido())
+    assert erro.value.motivo == "certificado_vencido"
+
+
+def test_xml_de_contingencia_ilegivel_e_do_documento():
+    with pytest.raises(sefaz.DocumentoInvalido):
+        _motor_com(LibQueFalha("NFE_CarregarXML", "Erro ao ler http://x")).transmitir(_pedido())
+
+
+def test_no_envio_a_classificacao_por_texto_continua_valendo():
+    with pytest.raises(sefaz.FalhaIncerta):
+        _motor_com(LibQueFalha("NFE_Enviar", "Socket Error # 10054 Connection reset by peer")).emitir(_pedido())
+
+
+@pytest.mark.parametrize("nt", [True, False])
+def test_no_windows_a_pasta_da_lib_vem_primeiro_no_path(monkeypatch, tmp_path, nt):
+    """Sem isto a DLL não acha a libxml2 ao lado dela e nenhuma nota é assinada."""
+    import os
+    from types import SimpleNamespace
+
+    from app import acbrlib
+
+    ambiente = {"PATH": os.pathsep.join(["outra", str(tmp_path), "mais"])}
+    monkeypatch.setattr(acbrlib, "os", SimpleNamespace(name="nt" if nt else "posix", path=os.path, pathsep=os.pathsep,
+                                                       environ=ambiente))
+    for _ in range(2):  # repetir não acumula
+        acbrlib._achar_dlls_vizinhas(str(tmp_path / "ACBrNFe64.dll"))
+    esperado = [str(tmp_path), "outra", "mais"] if nt else ["outra", str(tmp_path), "mais"]
+    assert ambiente["PATH"].split(os.pathsep) == esperado
+
+
 class LibDeResposta:
     """Responde `dados` como a ACBrLib: diz o tamanho e só copia o que cabe."""
 

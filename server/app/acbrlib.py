@@ -42,10 +42,27 @@ def fuso_local():
     return f"{bruto[:3]}:{bruto[3:]}"
 
 
+def _achar_dlls_vizinhas(caminho):
+    """Windows: a pasta da lib entra no começo do PATH do processo.
+
+    A ACBrLib abre a libxml2 e o OpenSSL pelo nome, em tempo de execução, e o
+    Windows só os procura na pasta do .exe e no PATH — não ao lado da DLL. Sem
+    isto a lib carrega, o /health responde 200 e TODA assinatura falha com
+    "XmlNode não pode ser nulo". É o `garantir_libxml2` do Windows.
+    """
+    pasta = os.path.dirname(os.path.abspath(caminho))
+    if os.name != "nt" or not os.path.isdir(pasta):
+        return
+    pastas = os.environ.get("PATH", "").split(os.pathsep)
+    if pastas[0] != pasta:
+        os.environ["PATH"] = os.pathsep.join([pasta, *(p for p in pastas if p and p != pasta)])
+
+
 class AcbrLib:
     nome = "acbrlib"
 
     def __init__(self, caminho, arquivo_config="/app/config/ACBrLib.ini", schemas=None):
+        _achar_dlls_vizinhas(caminho)
         self.lib = ctypes.CDLL(caminho)
         self.trava = threading.Lock()
         self.handle = ctypes.c_void_p()
@@ -85,6 +102,21 @@ class AcbrLib:
     def _ok(self, codigo, enviando=False):
         if codigo < 0:
             raise _classificar(self._ultimo_retorno(), enviando=enviando)
+
+    def _documento(self, codigo, assinando=False):
+        """Etapa local (carregar, assinar, validar): nada saiu daqui.
+
+        A falha é do documento — ou do certificado, só na assinatura. Nunca
+        `sem_comunicacao` (viraria contingência por erro de cadastro) nem
+        `incerto` (o cliente consultaria uma nota que não existe).
+        """
+        if codigo >= 0:
+            return
+        mensagem = self._ultimo_retorno()
+        falha = _classificar(mensagem)
+        if assinando and isinstance(falha, sefaz.FalhaDeConfiguracao):
+            raise falha
+        raise sefaz.DocumentoInvalido(mensagem)
 
     def _ultimo_retorno(self, tamanho_inicial=TAMANHO):
         # A lib informa em `tamanho` quanto a resposta precisa: se não coube, pede de
@@ -134,9 +166,9 @@ class AcbrLib:
         with self._vez():
             self._configurar(pedido, pedido.tp_emis)
             self._ok(self.lib.NFE_LimparLista(self.handle))
-            self._ok(self.lib.NFE_CarregarINI(self.handle, _c(pedido.ini)))
-            self._ok(self.lib.NFE_Assinar(self.handle))
-            self._ok(self.lib.NFE_Validar(self.handle))
+            self._documento(self.lib.NFE_CarregarINI(self.handle, _c(pedido.ini)))
+            self._documento(self.lib.NFE_Assinar(self.handle), assinando=True)
+            self._documento(self.lib.NFE_Validar(self.handle))
             assinado = self._xml_atual()
             if pedido.tp_emis == "9":
                 return {"situacao": "contingencia", **_do_xml(assinado), "xml": assinado}
@@ -146,7 +178,7 @@ class AcbrLib:
         with self._vez():
             self._configurar(pedido, "9")
             self._ok(self.lib.NFE_LimparLista(self.handle))
-            self._ok(self.lib.NFE_CarregarXML(self.handle, _c(pedido.xml)))
+            self._documento(self.lib.NFE_CarregarXML(self.handle, _c(pedido.xml)))
             return self._enviar(pedido)
 
     def _enviar(self, pedido):
@@ -205,6 +237,12 @@ _ANTES_DO_ENVIO = ("resolver", "could not resolve", "host not found", "host desc
                    "conexão recusada", "conexao recusada", "11001", "10061", "10065", "10051",
                    "network is unreachable", "rede inacess")
 _COMUNICACAO = ("socket", "conex", "http", "host", "resolver", "winsock")
+#: O erro de schema por extenso (ExibirErroSchema=1), como a libxml2 o escreve:
+#: "Element '{http://www.portalfiscal.inf.br/nfe}NCM': [facet 'pattern'] ...". O
+#: "http" do namespace não é rede, e o texto pode citar qualquer campo da nota.
+_ESQUEMA = re.compile(r"element '\{|\[facet '")
+#: "validação" (e não só "validar"); o "�" é o acento que a lib mandou fora do UTF-8.
+_VALIDACAO = re.compile("validar|valida[cç�]")
 
 
 def _classificar(mensagem, enviando=False):
@@ -216,9 +254,11 @@ def _classificar(mensagem, enviando=False):
     "Erro HTTP 500", conexão caída no meio — pode ter chegado à SEFAZ: `incerto`.
     """
     texto = mensagem.lower()
+    if _ESQUEMA.search(texto):
+        return sefaz.DocumentoInvalido(mensagem)
     if any(p in texto for p in ("certificado", "pfx", "senha", "csc", "biblioteca")):
         return sefaz.FalhaDeConfiguracao(mensagem, _motivo_de_configuracao(texto))
-    if any(p in texto for p in ("schema", "validar", "rejei", "ini inv")):
+    if _VALIDACAO.search(texto) or any(p in texto for p in ("schema", "rejei", "ini inv")):
         return sefaz.DocumentoInvalido(mensagem)
     if any(p in texto for p in ("timeout", "tempo limite", "timed out", "read timed")):
         return sefaz.FalhaIncerta(mensagem, "sefaz_sem_resposta")
