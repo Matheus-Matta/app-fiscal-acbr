@@ -262,6 +262,15 @@ Responde o resultado, com a mesma chave da contingência.
 
 NFC-e: em geral até 30 minutos depois da autorização (regra da SEFAZ de cada UF).
 
+### `POST /v1/nfe/inutilizar`
+
+Números que nunca viraram nota. Além do contexto: `ano` (dois dígitos, `26`), `serie`,
+`numero_inicial`, `numero_final` (no máximo 1000 números) e `justificativa` (15 a 255).
+
+Resposta: `situacao` `inutilizada` ou `rejeitada`, `cstat`, `motivo`, `protocolo`,
+`recebido_em` e `xml`. Repetir a mesma faixa responde `inutilizada` (cStat 563 ou 206), às
+vezes sem protocolo.
+
 ## 6. Configuração
 
 | Rota | Nuvem | Local |

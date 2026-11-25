@@ -96,7 +96,8 @@ Todas são `POST` — na nuvem, com o corpo cifrado (ver "Cifra de ponta a ponta
 | `/v1/nfe/emitir` | `ini`, `tp_emis` (`"1"` normal, `"9"` contingência: só assina) |
 | `/v1/nfe/transmitir` | `xml` (o assinado em contingência, quando a SEFAZ voltar) |
 | `/v1/nfe/consultar` | `chave` (44 dígitos) |
-| `/v1/nfe/cancelar` | `chave`, `protocolo`, `justificativa` (15 a 255 caracteres) |
+| `/v1/nfe/cancelar` | `chave`, `protocolo`, `justificativa` (15 a 255 caracteres). A resposta traz em `xml` o do **evento** |
+| `/v1/nfe/inutilizar` | `ano` (dois dígitos), `serie`, `numero_inicial`, `numero_final` (até 1000 por chamada), `justificativa` (15 a 255) |
 
 O contexto:
 

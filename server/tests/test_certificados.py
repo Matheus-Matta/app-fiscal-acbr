@@ -20,7 +20,8 @@ CNPJ = "11222333000181"
 SENHA = "senha-do-a1"
 CONTEXTO = {"uf": "SP", "cnpj": CNPJ, "ambiente": "2", "modelo": "65"}
 INI = "[Identificacao]\ncNF=12345678\nmod=65\nserie=1\nnNF=42\ndhEmi=09/10/2026 10:00:00\ntpEmis=1\n"
-ROTAS = ["/v1/status-servico", "/v1/nfe/emitir", "/v1/nfe/transmitir", "/v1/nfe/consultar", "/v1/nfe/cancelar"]
+ROTAS = ["/v1/status-servico", "/v1/nfe/emitir", "/v1/nfe/transmitir", "/v1/nfe/consultar", "/v1/nfe/cancelar",
+         "/v1/nfe/inutilizar"]
 
 
 def _pfx(*, nome=f"EMPRESA TESTE LTDA:{CNPJ}", dias=365, senha=SENHA):

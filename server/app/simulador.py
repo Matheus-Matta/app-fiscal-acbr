@@ -61,6 +61,7 @@ class Simulador:
 
     def __init__(self):
         self.autorizadas = {}
+        self.inutilizadas = set()
 
     def _modo(self):
         return os.environ.get("ACBR_SIMULAR_SEFAZ", "online")
@@ -109,7 +110,22 @@ class Simulador:
         if pedido.chave not in self.autorizadas:
             return {"situacao": "rejeitada", "cstat": "217", "motivo": "NF-e não consta na base"}
         return {"situacao": "cancelada", "cstat": "135", "motivo": "Evento registrado",
-                "chave": pedido.chave, "protocolo": f"9{pedido.chave[-14:]}"}
+                "chave": pedido.chave, "protocolo": f"9{pedido.chave[-14:]}", "xml": "<procEventoNFe/>"}
+
+    def inutilizar(self, pedido):
+        _recusar_producao(pedido)
+        if self._modo() == "fora":
+            raise sefaz.FalhaDeComunicacao("SEFAZ simulada fora do ar.")
+        faixa = (pedido.cnpj, pedido.serie, pedido.numero_inicial, pedido.numero_final)
+        usadas = {(int(c[22:25]), int(c[25:34])) for c in self.autorizadas}
+        if any((pedido.serie, n) in usadas for n in range(pedido.numero_inicial, pedido.numero_final + 1)):
+            return {"situacao": "rejeitada", "cstat": "241", "motivo": "Um número da faixa já foi utilizado (simulado)"}
+        repetida = faixa in self.inutilizadas
+        self.inutilizadas.add(faixa)
+        if self._modo() == "lenta" and not repetida:
+            raise sefaz.FalhaIncerta("Resposta da SEFAZ simulada perdida depois do envio.")
+        return {"situacao": "inutilizada", "cstat": "563" if repetida else "102", "motivo": MOTIVO_SIMULADO,
+                "protocolo": f"1{pedido.serie:03d}{pedido.numero_inicial:09d}", "xml": "<procInutNFe/>"}
 
     def status_servico(self, _pedido):
         online = self._modo() != "fora"

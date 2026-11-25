@@ -71,7 +71,36 @@ def test_cancela_a_autorizada(api):
     chave = _emitir(api).json()["chave"]
     corpo = api.post("/v1/nfe/cancelar", json={**CONTEXTO, "chave": chave, "protocolo": "1",
                                                "justificativa": "cliente desistiu da compra"}).json()
-    assert corpo["situacao"] == "cancelada"
+    assert corpo["situacao"] == "cancelada" and corpo["xml"]
+
+
+FAIXA = {"ano": 26, "serie": 50, "numero_inicial": 7, "numero_final": 9, "justificativa": "numeros pulados por falha"}
+
+
+def test_inutiliza_e_repetir_a_mesma_faixa_continua_inutilizada(api):
+    for cstat in ("102", "563"):
+        corpo = api.post("/v1/nfe/inutilizar", json={**CONTEXTO, **FAIXA}).json()
+        assert (corpo["situacao"], corpo["cstat"]) == ("inutilizada", cstat)
+        assert corpo["protocolo"] and corpo["xml"]
+
+
+def test_numero_ja_usado_nao_se_inutiliza(api):
+    _emitir(api)  # série 1, número 42
+    corpo = api.post("/v1/nfe/inutilizar", json={**CONTEXTO, **FAIXA, "serie": 1, "numero_inicial": 40,
+                                                 "numero_final": 45}).json()
+    assert corpo["situacao"] == "rejeitada"
+
+
+def test_resposta_perdida_da_inutilizacao_e_incerta_e_a_repeticao_confirma(api, monkeypatch):
+    monkeypatch.setenv("ACBR_SIMULAR_SEFAZ", "lenta")
+    assert api.post("/v1/nfe/inutilizar", json={**CONTEXTO, **FAIXA}).json()["erro"] == "incerto"
+    assert api.post("/v1/nfe/inutilizar", json={**CONTEXTO, **FAIXA}).json()["situacao"] == "inutilizada"
+
+
+def test_faixa_invertida_grande_ou_sem_motivo_e_recusada_sem_sair(api):
+    for troca in ({"numero_final": 6}, {"numero_final": 1007}, {"justificativa": "curta"}, {"ano": 2026}, {"serie": 1000}):
+        resposta = api.post("/v1/nfe/inutilizar", json={**CONTEXTO, **FAIXA, **troca})
+        assert resposta.json()["erro"] == "documento_invalido", troca
 
 
 def test_status_servico(api, monkeypatch):

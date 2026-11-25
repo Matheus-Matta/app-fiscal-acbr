@@ -12,6 +12,9 @@ DUPLICIDADE = {"204", "539"}
 NAO_ENCONTRADA = {"217", "562"}
 PROCESSANDO = {"103", "104", "105"}
 CANCELADA = {"101", "135", "155"}
+# Inutilização: homologada, ou a MESMA faixa já estava (pedido repetido depois de
+# uma resposta perdida). Faixa parcialmente usada (241, 256) é recusa.
+INUTILIZADA = {"102", "206", "563"}
 # Serviço paralisado: é indisponibilidade, não recusa — justifica contingência.
 PARALISADA = {"108", "109"}
 
@@ -43,6 +46,15 @@ class DocumentoInvalido(FalhaFiscal):
 
 class FalhaDeConfiguracao(FalhaFiscal):
     """Certificado, CSC ou biblioteca: nenhuma nota sai até corrigir."""
+
+
+def situacao_da_inutilizacao(cstat):
+    cstat = str(cstat or "").strip()
+    if cstat in PARALISADA:
+        raise FalhaDeComunicacao(f"SEFAZ com o serviço paralisado (cStat {cstat}).", "sefaz_sem_comunicacao")
+    if not cstat:
+        raise FalhaIncerta("A SEFAZ não informou o resultado da inutilização.", "sefaz_sem_resposta")
+    return "inutilizada" if cstat in INUTILIZADA else "rejeitada"
 
 
 def situacao(cstat):

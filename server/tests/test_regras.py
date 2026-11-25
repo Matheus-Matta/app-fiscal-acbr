@@ -207,3 +207,53 @@ def test_com_a_trava_ocupada_responde_sem_comunicacao_sem_enviar(monkeypatch):
         with motor._vez():
             pass
     assert erro.value.motivo == "comunicador_ocupado"
+
+
+# ── inutilização e o XML do evento ───────────────────────────────────────────
+class LibQueResponde:
+    """A última chamada fica em `args`; a resposta é o INI `texto`."""
+
+    def __init__(self, texto):
+        self.texto, self.args = texto, None
+
+    def __getattr__(self, _nome):
+        def chamada(*args):
+            if len(args) > 6 or _nome == "NFE_Cancelar":
+                self.args, buffer, tamanho = args, args[-2], args[-1]
+                buffer.value = self.texto.encode()
+                tamanho._obj.value = len(buffer.value)
+            return 0
+        return chamada
+
+
+def _inutilizacao(**campos):
+    return _pedido(ano=26, serie=50, numero_inicial=7, numero_final=9, justificativa="numeros pulados por falha", **campos)
+
+
+def test_inutilizar_passa_os_parametros_na_ordem_da_lib():
+    lib = LibQueResponde("[Inutilizacao]\nCStat=102\nXMotivo=Homologada\nNProt=135\nXml=<a b=\"c\"/>")
+    corpo = _motor_com(lib).inutilizar(_inutilizacao())
+    cnpj, motivo, *numeros = lib.args[1:-2]
+    assert (cnpj, motivo) == (b"11222333000181", b"numeros pulados por falha")
+    assert [n.value for n in numeros] == [26, 65, 50, 7, 9]  # ano, modelo, série, inicial, final
+    assert (corpo["situacao"], corpo["protocolo"], corpo["xml"]) == ("inutilizada", "135", '<a b="c"/>')
+
+
+@pytest.mark.parametrize(("cstat", "situacao"), [("102", "inutilizada"), ("563", "inutilizada"), ("206", "inutilizada"),
+                                                 ("241", "rejeitada"), ("256", "rejeitada"), ("999", "rejeitada")])
+def test_cstat_da_inutilizacao(cstat, situacao):
+    assert sefaz.situacao_da_inutilizacao(cstat) == situacao
+
+
+def test_inutilizacao_paralisada_ou_sem_resposta_nunca_vira_recusa():
+    with pytest.raises(sefaz.FalhaDeComunicacao):
+        sefaz.situacao_da_inutilizacao("108")
+    with pytest.raises(sefaz.FalhaIncerta):
+        _motor_com(LibQueResponde("[Inutilizacao]\nXMotivo=")).inutilizar(_inutilizacao())
+
+
+@pytest.mark.parametrize(("xml", "esperado"), [("<procEventoNFe/>", "<procEventoNFe/>"), ("", ""), ("C:/caminho.xml", "")])
+def test_cancelamento_devolve_o_xml_do_evento(xml, esperado):
+    lib = LibQueResponde(f"[CANCELAMENTO]\nCStat=135\nNProt=9\nXML={xml}")
+    corpo = _motor_com(lib).cancelar(_pedido(chave="3" * 44, justificativa="cliente desistiu da compra"))
+    assert (corpo["situacao"], corpo["xml"]) == ("cancelada", esperado)

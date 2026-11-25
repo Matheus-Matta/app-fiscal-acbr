@@ -208,7 +208,9 @@ O INI segue o leiaute da ACBrLib NFe. Algumas recusas comuns:
 O ambiente vai na chamada, nos dois modos: `"2"` homologação, `"1"` produção. Ao passar
 para produção, troque também o **CSC** pelo de produção e confira o **próximo número** da
 série: notas de teste não ocupam números de produção, mas um buraco na série exige
-inutilização na SEFAZ.
+inutilização na SEFAZ (`/v1/nfe/inutilizar`). Resposta `inutilizada` (102, ou 206/563: a
+mesma faixa já estava, então repetir depois de um `incerto` é seguro) ou `rejeitada` (241:
+um número da faixa foi usado). Nunca inutilize número de nota com resultado desconhecido.
 
 ## Simulador
 

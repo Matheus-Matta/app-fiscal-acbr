@@ -204,8 +204,22 @@ class AcbrLib:
             self._configurar(pedido)
             resposta = ini.ler(self._texto(self.lib.NFE_Cancelar, _c(pedido.chave), _c(pedido.justificativa),
                                            _c(pedido.cnpj), ctypes.c_int(1), enviando=True))
-            return self._resultado(ini.primeira(resposta, "evento", "cancelamento", "retorno"),
-                                   chave=pedido.chave)
+            campos = ini.primeira(resposta, "evento", "cancelamento", "retorno")
+            # O XML é o do EVENTO (o contador o pede junto do da nota), não o da nota.
+            return {**self._resultado(campos, chave=pedido.chave), "xml": _xml_ou_vazio(campos)}
+
+    def inutilizar(self, pedido):
+        with self._vez():
+            self._configurar(pedido)
+            resposta = ini.ler(self._texto(
+                self.lib.NFE_Inutilizar, _c(pedido.cnpj), _c(pedido.justificativa), ctypes.c_int(pedido.ano),
+                ctypes.c_int(int(pedido.modelo)), ctypes.c_int(pedido.serie), ctypes.c_int(pedido.numero_inicial),
+                ctypes.c_int(pedido.numero_final), enviando=True))
+            campos = ini.primeira(resposta, "inutilizacao", "retorno")
+            cstat = campos.get("cstat", "")
+            return {"situacao": sefaz.situacao_da_inutilizacao(cstat), "cstat": cstat,
+                    "motivo": campos.get("xmotivo", ""), "protocolo": campos.get("nprot", ""),
+                    "recebido_em": campos.get("dhrecbto", ""), "xml": _xml_ou_vazio(campos)}
 
     def status_servico(self, pedido):
         with self._vez():
@@ -221,6 +235,11 @@ class AcbrLib:
                 "chave": campos.get("chdfe") or campos.get("chnfe") or chave,
                 "protocolo": campos.get("nprot", ""), "recebido_em": campos.get("dhrecbto", ""),
                 "xml": xml, **({k: v for k, v in _do_xml(xml).items() if k != "chave"} if xml else {})}
+
+
+def _xml_ou_vazio(campos):
+    xml = campos.get("xml", "").strip()
+    return xml if xml.startswith("<") else ""
 
 
 def _do_xml(xml):

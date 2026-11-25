@@ -8,7 +8,7 @@ que o desktop grava); na nuvem eles também vêm na chamada.
 import re
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 UF = Literal["AC", "AL", "AM", "AP", "BA", "CE", "DF", "ES", "GO", "MA", "MG", "MS", "MT", "PA", "PB",
              "PE", "PI", "PR", "RJ", "RN", "RO", "RR", "RS", "SC", "SE", "SP", "TO"]
@@ -69,6 +69,23 @@ class Cancelar(Contexto):
     protocolo: str = Field(min_length=1)
     # O limite da SEFAZ para o xJust do evento de cancelamento.
     justificativa: str = Field(min_length=15, max_length=255)
+
+
+class Inutilizar(Contexto):
+    """Faixa de números que nunca viraram nota. `ano` é o da numeração, com dois dígitos."""
+
+    ano: int = Field(ge=0, le=99)
+    serie: int = Field(ge=0, le=999)
+    numero_inicial: int = Field(ge=1, le=999_999_999)
+    numero_final: int = Field(ge=1, le=999_999_999)
+    justificativa: str = Field(min_length=15, max_length=255)
+
+    @model_validator(mode="after")
+    def _faixa(self):
+        # Mil por pedido é o limite da SEFAZ; faixa invertida inutilizaria o que ninguém pediu.
+        if not 0 <= self.numero_final - self.numero_inicial < 1000:
+            raise ValueError("faixa inválida")
+        return self
 
 
 # ── configuração guardada ────────────────────────────────────────────────────

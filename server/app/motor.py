@@ -85,4 +85,4 @@ class SemLib:
     def _recusar(self, _pedido):
         raise sefaz.FalhaDeConfiguracao(self.mensagem, "acbrlib_ausente")
 
-    status_servico = emitir = transmitir = consultar = cancelar = _recusar
+    status_servico = emitir = transmitir = consultar = cancelar = inutilizar = _recusar

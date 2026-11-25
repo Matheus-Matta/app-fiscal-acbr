@@ -303,6 +303,7 @@ _rota("/v1/nfe/emitir", modelos.Emitir, _fiscal("emitir"))
 _rota("/v1/nfe/transmitir", modelos.Transmitir, _fiscal("transmitir"))
 _rota("/v1/nfe/consultar", modelos.Consultar, _fiscal("consultar"))
 _rota("/v1/nfe/cancelar", modelos.Cancelar, _fiscal("cancelar"))
+_rota("/v1/nfe/inutilizar", modelos.Inutilizar, _fiscal("inutilizar"))
 
 
 # ── configuração ─────────────────────────────────────────────────────────────
