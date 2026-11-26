@@ -1,16 +1,17 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, Aviso, Campo, Cartao, formatarCnpj, formatarData, mensagemDe } from '../comum';
 
-// Só os segredos se configuram aqui. UF, ambiente, modelo, fuso, regime e CST vêm
-// do PDV em cada emissão.
-const VAZIO = { cnpj: '', senha: '', cscId: '', cscToken: '' };
+// Só o certificado A1 e a senha se configuram aqui. O CSC, a UF, o ambiente, o
+// modelo, o fuso, o regime e o CST vêm do PDV em cada emissão (o StarChef Desktop
+// tira o CSC do cadastro fiscal do StarChef). Um CSC guardado antes continua
+// valendo para o PDV que não o mandar.
+const VAZIO = { cnpj: '', senha: '' };
 
 function formDe(emitente) {
   if (!emitente) return { ...VAZIO };
   return {
     ...VAZIO,
     cnpj: formatarCnpj(emitente.cnpj),
-    cscId: emitente.csc.id,
   };
 }
 
@@ -78,16 +79,11 @@ export default function Emitente({ estado }) {
       setRetorno({ tipo: 'erro', texto: 'Informe a senha do certificado.' });
       return;
     }
-    const cscMudou = form.cscId !== (atual?.csc.id || '');
-    if (!form.cscToken && cscMudou && form.cscId) {
-      setRetorno({ tipo: 'erro', texto: 'Ao trocar o ID do CSC, informe também o código (token) do CSC.' });
-      return;
-    }
     const dados = {
       cnpj: form.cnpj,
       // null = mantém o que já está guardado
       certificado: arquivo ? { pfx_base64: arquivo.pfx_base64, senha: form.senha } : null,
-      csc: form.cscToken ? { id: form.cscId, token: form.cscToken } : null,
+      csc: null, // vem do PDV em cada emissão
     };
     setSalvando(true);
     const resposta = await api.salvarEmitente(dados);
@@ -143,8 +139,9 @@ export default function Emitente({ estado }) {
     <>
       <h1>Emitente</h1>
       <p className="introducao">
-        Aqui ficam só os segredos do emitente — certificado A1, senha e CSC —, guardados e cifrados no comunicador.
-        UF, ambiente, modelo, fuso, regime e CST vêm do PDV em cada emissão. Sem internet, a nota sai em contingência
+        Aqui ficam só o certificado A1 e a senha do emitente, guardados e cifrados no comunicador. O CSC, a UF, o
+        ambiente, o modelo, o fuso, o regime e o CST vêm do PDV em cada emissão (o StarChef Desktop tira o CSC do
+        cadastro fiscal do StarChef). Sem internet, a nota sai em contingência
         offline aqui mesmo.
       </p>
 
@@ -172,7 +169,7 @@ export default function Emitente({ estado }) {
       <form onSubmit={salvar}>
         <Cartao titulo="Empresa">
           <div className="grade">
-            <Campo rotulo="CNPJ" ajuda="Identifica de quem são o certificado e o CSC.">
+            <Campo rotulo="CNPJ" ajuda="Identifica de quem é o certificado.">
               <input value={form.cnpj} onChange={mudar('cnpj')} required disabled={editando} placeholder="00.000.000/0000-00" />
             </Campo>
           </div>
@@ -193,22 +190,9 @@ export default function Emitente({ estado }) {
           </div>
         </Cartao>
 
-        <Cartao titulo="CSC (código de segurança do contribuinte)">
-          <p className="nota">Obrigatório na NFC-e: gerado no portal da SEFAZ da sua UF. Vai no QR Code do cupom.</p>
-          {editando && (
-            <Aviso tipo={atual.csc.configurado ? 'ok' : 'alerta'}>
-              {atual.csc.configurado ? `CSC guardado (ID ${atual.csc.id}).` : 'Nenhum CSC guardado.'}
-            </Aviso>
-          )}
-          <div className="grade">
-            <Campo rotulo="ID do CSC">
-              <input value={form.cscId} onChange={mudar('cscId')} placeholder="ex.: 000001" />
-            </Campo>
-            <Campo rotulo="Código do CSC" ajuda={atual?.csc.configurado ? 'Em branco: mantém o guardado.' : ''}>
-              <input type="password" value={form.cscToken} onChange={mudar('cscToken')} autoComplete="off" />
-            </Campo>
-          </div>
-        </Cartao>
+        {editando && atual.csc.configurado && (
+          <p className="nota">CSC guardado antes (ID {atual.csc.id}): vale só para o PDV que não mandar o dele.</p>
+        )}
 
         <Aviso tipo={retorno?.tipo}>{retorno?.texto}</Aviso>
         <div className="rodape-form">
